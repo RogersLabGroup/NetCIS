@@ -15,7 +15,7 @@
 
 - cutadapt to trim adapter and SB tags
 - map reads to reference with bowtie2
-- output as bam files
+- output as bam filesg
 - change bam files to bed files, one insertion site per line? How to do this
 - strand orientation of insertions
   - positive strand
@@ -37,6 +37,13 @@
 - optionally choose what chromosomes to exlude to prevent infalted local hopping insertion events
 
 - database of targeted genes to compare to
+
+## QC checks for input data
+
+- To do first
+- <https://transit.readthedocs.io/en/latest/tpp.html#tpp-statistics>
+- <https://transit.readthedocs.io/en/latest/transit_features.html>
+- per chromosome, then whole genome, then whole genome minus local hopping chromosomes
 
 ## Construct network (using pseudo code from graph framework article)
 
@@ -92,6 +99,10 @@
   - rank based methods are preferred
     - Wilcoxon
     - Mann-Whiteney
+
+- Somehow get a p-value of each CIS
+  - Is there a way to tie-back to the QC for a CIS region to help determine significance?
+  - What's the quality of the underlying data?
 
 - Is there a way to incorporate insertion direction into graph?
 
