@@ -4,7 +4,7 @@ import logging
 import sys
 
 
-def get_logger(result_dir_path, loglevel):
+def get_logger(result_dir_path, loglevel) -> logging.Logger:
     """Provide basic logging controls and returns a logging object.
 
     logging levels:
@@ -20,19 +20,20 @@ def get_logger(result_dir_path, loglevel):
                                                 expensive_func2())
     """
 
-    log_path = result_dir_path / 'logging'
+    log_path = result_dir_path / "logging"
     log_path.mkdir(exist_ok=True)
 
     logging._srcfile = None
     logging.logThreads = False
     logging.logProcesses = False
     logging.logMultiprocessing = False
-    logging.basicConfig(filename=log_path / 'logger.log',
-                        filemode='w',
-                        format='%(levelname)s : %(asctime)s : %(message)s',
-                        datefmt='%m/%d/%Y %I:%M:%S %p',
-                        level=loglevel,
-                        )
+    logging.basicConfig(
+        filename=log_path / "logger.log",
+        filemode="w",
+        format="%(levelname)s : %(asctime)s : %(message)s",
+        datefmt="%m/%d/%Y %I:%M:%S %p",
+        level=loglevel,
+    )
     logging.captureWarnings(True)
     logger = logging.getLogger(__name__)
     logger.info(sys.argv)
