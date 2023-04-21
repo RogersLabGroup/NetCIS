@@ -1,14 +1,13 @@
 from pathlib import Path
 import sys
-import os
 
 import pysam
 import pandas as pd
 import numpy as np
 
 
-# TODO: changing chromosome names. 
-# This likely shouldn't stay in here, however, there needs to be someway to state what contigs to keep 
+# TODO: changing chromosome names.
+# This likely shouldn't stay in here, however, there needs to be someway to state what contigs to keep
 # should we expect that contigs are already in a format desireable by the user?
 # If that is too advanced for them, then running this tool may be beyond their current skill set
 
@@ -103,9 +102,9 @@ def read_is_quality(read, is_irr, chr_dict) -> bool:
 
 def process_bam(file, chr_dict, is_irr) -> pd.DataFrame | None:
     """
-        Filter out low quality insertions
-        This only can run on paired read sequencing data
-        is_irr will dictate in what orientation the transposon was sequenced. IRR == forward
+    Filter out low quality insertions
+    This only can run on paired read sequencing data
+    is_irr will dictate in what orientation the transposon was sequenced. IRR == forward
     """
 
     bam = pysam.AlignmentFile(file, "rb")
@@ -186,27 +185,31 @@ def main() -> None:
     output_prefix = sys.argv[1]
     npara = int(sys.argv[2])
     input_files = sys.argv[3]
-    
+
     bam_dir = Path(output_prefix + "-bam")
-    
+
     insertions_dir = Path(output_prefix + "-insertions")
     insertions_dir.mkdir(parents=True, exist_ok=True)
-    
+
     files_df = pd.read_csv(input_files, sep="\t", header=None)
-    
+
     # TODO: use multiprocessing here
     for row in files_df.iterrows():
         mysample = row[1][0]
         irl_bam = bam_dir / (mysample + "_IRL.bam")
         irr_bam = bam_dir / (mysample + "_IRR.bam")
-        
+
         # find quality insertion in IRR and IRL libraries and convert them to single insertion site format
         inserts_irl_df = process_bam(file=irl_bam, chr_dict=chr_dict, is_irr=False)
-        if inserts_irl_df is not None:  # if no insertions present, process_bam returns None
+        if (
+            inserts_irl_df is not None
+        ):  # if no insertions present, process_bam returns None
             inserts_irl_df["seq library"] = "IRL"
 
         inserts_irr_df = process_bam(file=irr_bam, chr_dict=chr_dict, is_irr=True)
-        if inserts_irr_df is not None:  # if no insertions present, process_bam returns None
+        if (
+            inserts_irr_df is not None
+        ):  # if no insertions present, process_bam returns None
             inserts_irr_df["seq library"] = "IRR"
 
         # concat of a dataframe and if None just results in the original dataframe
@@ -223,4 +226,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    
