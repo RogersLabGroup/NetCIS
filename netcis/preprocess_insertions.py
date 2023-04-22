@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from multiprocessing import Pool
 
 import pysam
 import pandas as pd
@@ -181,6 +182,33 @@ def process_bam(file, chr_dict, is_irr) -> pd.DataFrame | None:
     # return res_df
 
 
+def process_bam_helper(iter_args) -> None:
+    row, bam_dir, insertions_dir = iter_args
+    mysample = row[0]
+    irl_bam = bam_dir / (mysample + "_IRL.bam")
+    irr_bam = bam_dir / (mysample + "_IRR.bam")
+
+    # find quality insertion in IRR and IRL libraries and convert them to single insertion site format
+    inserts_irl_df = process_bam(file=irl_bam, chr_dict=chr_dict, is_irr=False)
+    if (inserts_irl_df is not None):  # if no insertions present, process_bam returns None
+        inserts_irl_df["seq library"] = "IRL"
+
+    inserts_irr_df = process_bam(file=irr_bam, chr_dict=chr_dict, is_irr=True)
+    if (inserts_irr_df is not None):  # if no insertions present, process_bam returns None
+        inserts_irr_df["seq library"] = "IRR"
+
+    # concat of a dataframe and if None just results in the original dataframe
+    inserts_df = pd.concat([inserts_irl_df, inserts_irr_df], ignore_index=True)
+
+    # verify that insertions did not count both read1 and read2
+    # do this by checking that the length of 'read names'is the same number as the length of unique read names
+    read_names = inserts_df["read name"].to_numpy()
+    assert len(np.unique(read_names)) == len(read_names)
+
+    # save insertions
+    inserts_df.to_csv(insertions_dir / (mysample + ".csv"), index=False)
+
+
 def main() -> None:
     output_prefix = sys.argv[1]
     npara = int(sys.argv[2])
@@ -192,36 +220,9 @@ def main() -> None:
     insertions_dir.mkdir(parents=True, exist_ok=True)
 
     files_df = pd.read_csv(input_files, sep="\t", header=None)
-
-    # TODO: use multiprocessing here
-    for row in files_df.iterrows():
-        mysample = row[1][0]
-        irl_bam = bam_dir / (mysample + "_IRL.bam")
-        irr_bam = bam_dir / (mysample + "_IRR.bam")
-
-        # find quality insertion in IRR and IRL libraries and convert them to single insertion site format
-        inserts_irl_df = process_bam(file=irl_bam, chr_dict=chr_dict, is_irr=False)
-        if (
-            inserts_irl_df is not None
-        ):  # if no insertions present, process_bam returns None
-            inserts_irl_df["seq library"] = "IRL"
-
-        inserts_irr_df = process_bam(file=irr_bam, chr_dict=chr_dict, is_irr=True)
-        if (
-            inserts_irr_df is not None
-        ):  # if no insertions present, process_bam returns None
-            inserts_irr_df["seq library"] = "IRR"
-
-        # concat of a dataframe and if None just results in the original dataframe
-        inserts_df = pd.concat([inserts_irl_df, inserts_irr_df], ignore_index=True)
-
-        # verify that insertions did not count both read1 and read2
-        # do this by checking that the length of 'read names'is the same number as the length of unique read names
-        read_names = inserts_df["read name"].to_numpy()
-        assert len(np.unique(read_names)) == len(read_names)
-
-        # save insertions
-        inserts_df.to_csv(insertions_dir / (mysample + ".csv"), index=False)
+    iter_args = [ (row[1], bam_dir, insertions_dir) for row in files_df.iterrows() ]
+    with Pool(npara) as p:
+        [ x for x in p.imap_unordered(process_bam_helper, iter_args) ]
 
 
 if __name__ == "__main__":

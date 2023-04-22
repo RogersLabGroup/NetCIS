@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import os
+from multiprocessing import Pool
 
 import pandas as pd
 
@@ -15,9 +16,7 @@ forward_3_adaptor = "GTCCCTTAAGCGGAGCCCTATAGTGAGTCGTATTAC"
 reverse_3_adaptor = "CAGTTGAAGTCGGAAGTTTACATAC"
 
 
-def preprocess_reads(
-    data_dir, read_f, read_r, mysample_file, ntask, genome_index_dir
-) -> None:
+def preprocess_reads(read_f, read_r, mysample_file, ntask, genome_index_dir) -> None:
     """Process forward and reverse reads ---> trim adaptors ---> map reads"""
 
     # append temp names to the trimmed files
@@ -62,9 +61,24 @@ def preprocess_reads(
     os.system(f"rm {trim_f3}")
     os.system(f"rm {trim_r3}")
 
-    os.system(f"samtools sort -@ {ntask} -m 4G -l 9 -o {bam_file} {sam_file}")
+    os.system(f"samtools sort -@ {ntask} -m 8G -l 9 -o {bam_file} {sam_file}")
     os.system(f"samtools index -@ {ntask} {bam_file}")
     os.system(f"rm {sam_file}")
+
+
+def preprocess_read_helper(iter_args) -> None:
+    row, data_dir, bam_output_dir, ntask, genome_index_dir = iter_args
+    mysample = row[0]
+    irl_F = data_dir / row[1]
+    irl_R = data_dir / row[2]
+    irr_F = data_dir / row[3]
+    irr_R = data_dir / row[4]
+
+    irl_file = bam_output_dir / (mysample + "_IRL")
+    preprocess_reads(irl_F, irl_R, irl_file, ntask, genome_index_dir)
+
+    irr_file = bam_output_dir / (mysample + "_IRR")
+    preprocess_reads(irr_F, irr_R, irr_file, ntask, genome_index_dir)
 
 
 def main() -> None:
@@ -79,20 +93,9 @@ def main() -> None:
     bam_output_dir.mkdir(parents=True, exist_ok=True)
 
     files_df = pd.read_csv(input_files, sep="\t", header=None)
-    # TODO: use multiprocessing here
-    for row in files_df.iterrows():
-        row = row[1]
-        mysample = row[0]
-        irl_F = data_dir / row[1]
-        irl_R = data_dir / row[2]
-        irr_F = data_dir / row[3]
-        irr_R = data_dir / row[4]
-
-        irl_file = bam_output_dir / (mysample + "_IRL")
-        preprocess_reads(data_dir, irl_F, irl_R, irl_file, ntask, genome_index_dir)
-
-        irr_file = bam_output_dir / (mysample + "_IRR")
-        preprocess_reads(data_dir, irr_F, irr_R, irr_file, ntask, genome_index_dir)
+    iter_args = [ (row[1], data_dir, bam_output_dir, ntask, genome_index_dir) for row in files_df.iterrows() ]
+    with Pool(npara) as p:
+        [ x for x in p.imap_unordered(preprocess_read_helper, iter_args) ]
 
 
 if __name__ == "__main__":

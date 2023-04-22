@@ -79,7 +79,6 @@ def create_graph(insertions_df, chrom, threshold) -> nx.Graph:
             if node_dist <= threshold:
                 # add edge(ij) with a weight of the distance (or inverse?) to the network
                 G.add_edge(new_node, other_node, weight=1 / node_dist)
-
     return G
 
 
@@ -93,7 +92,6 @@ def graph_properties(G) -> None:
 
 
 def main(args) -> None:
-    # logger = utils.get_logger(args['output'], log_level=args['loglevel'])
 
     ### Load data
     # meta info about each file
@@ -102,9 +100,7 @@ def main(args) -> None:
     # get all files in data dir and load each file as pandas.DataFrame
     insert_list = []
     for file in args["dir"].iterdir():
-        file_meta_info = meta_df.loc[meta_df["file name"] == file.name].drop(
-            "file name", axis=1
-        )
+        file_meta_info = meta_df.loc[meta_df["file name"] == file.name].drop("file name", axis=1)
         tmp_df = pd.read_csv(file)
         tmp_df["cell type"] = file_meta_info["cell type"].tolist()[0]
         tmp_df["cell id"] = file_meta_info["cell id"].tolist()[0]
@@ -117,15 +113,12 @@ def main(args) -> None:
     group_cols = ["chr", "pos", "tpn promoter orient"]
     keep_cols = ["count", "count_irr", "count_irl"]
 
+    # TODO: if only using single insertions from a csv, what changes in this code???
     insert_case = inserts_df[inserts_df["tumor type"] == "S"]
-    insert_case_grouped = insert_case.groupby(
-        by=group_cols, as_index=False, dropna=False
-    ).sum(numeric_only=True)[group_cols + keep_cols]
+    insert_case_grouped = insert_case.groupby(by=group_cols, as_index=False, dropna=False).sum(numeric_only=True)[group_cols + keep_cols]
 
     insert_control = inserts_df[inserts_df["tumor type"] != "S"]
-    insert_control_grouped = insert_control.groupby(
-        by=group_cols, as_index=False, dropna=False
-    ).sum(numeric_only=True)[group_cols + keep_cols]
+    insert_control_grouped = insert_control.groupby(by=group_cols, as_index=False, dropna=False).sum(numeric_only=True)[group_cols + keep_cols]
 
     ### Construct network (using pseudo code from graph framework article)
     # TODO: this is where we could parallelize
@@ -135,25 +128,11 @@ def main(args) -> None:
     # p.starmap(create_graph_helper, iter_args)
     # p.starmap_async(create_graph_helper, iter_args)
     for chrom in np.unique(inserts_df["chr"].to_numpy()):
-        chr1_case_graph = create_graph(
-            insert_case_grouped, chrom, args["threshold"], args["njobs"]
-        )
+        chr1_case_graph = create_graph(insert_case_grouped, chrom, args["threshold"], args["njobs"])
         nx.write_graphml(chr1_case_graph, args["output"] / f"case-{chrom}.graphml")
 
-        chr1_control_graph = create_graph(
-            insert_control_grouped, chrom, args["threshold"], args["njobs"]
-        )
-        nx.write_graphml(
-            chr1_control_graph, args["output"] / f"control-{chrom}.graphml"
-        )
-
-    ### Analyze network
-    #     export network into CytoScape and analyze there OR use networkx for analysis
-    #     for each connected subgraph in the graph
-    #         if subgraph is not a random network
-    #             add subgraph to list of non-random CIS
-    #     Explore non-random CIS
-    #     Somehow get a p-value of each CIS
+        chr1_control_graph = create_graph(insert_control_grouped, chrom, args["threshold"], args["njobs"])
+        nx.write_graphml(chr1_control_graph, args["output"] / f"control-{chrom}.graphml")
 
 
 if __name__ == "__main__":
