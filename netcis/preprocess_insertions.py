@@ -199,17 +199,31 @@ def process_bam_helper(iter_args) -> None:
 
     # concat of a dataframe and if None just results in the original dataframe
     inserts_df = pd.concat([inserts_irl_df, inserts_irr_df], ignore_index=True)
+    # inserts_df = inserts_df.sort_values(['chr', 'pos'], ignore_index=True)
+
+    # # get seq library specific counts
+    # count_irr = np.where(inserts_df['seq library'] == 'IRR', inserts_df['count'], 0)
+    # count_irl = np.where(inserts_df['seq library'] == 'IRL', inserts_df['count'], 0)
+    # inserts_df.insert(6, "count_irr", count_irr)
+    # inserts_df.insert(7, "count_irl", count_irl)
+    # tmp_read_name = inserts_df.pop('read names')
+    # inserts_df.insert(len(inserts_df.columns.values), "read names", tmp_read_name)
 
     # verify that insertions did not count both read1 and read2
     # do this by checking that the length of 'read names'is the same number as the length of unique read names
     read_names = inserts_df["read name"].to_numpy()
     assert len(np.unique(read_names)) == len(read_names)
 
+    # # show total irr and irl conuts
+    # print(f"irr insertions: {inserts_df['count_irr'].sum()}")
+    # print(f"irl insertions: {inserts_df['count_irl'].sum()}")
+
     # save insertions
     inserts_df.to_csv(insertions_dir / (mysample + ".csv"), index=False)
 
 
 def main() -> None:
+    # TODO: change this to load_args using docopt
     output_prefix = sys.argv[1]
     npara = int(sys.argv[2])
     input_files = sys.argv[3]

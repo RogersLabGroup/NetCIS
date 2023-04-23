@@ -61,7 +61,7 @@ def preprocess_reads(read_f, read_r, mysample_file, ntask, genome_index_dir) -> 
     os.system(f"rm {trim_f3}")
     os.system(f"rm {trim_r3}")
 
-    os.system(f"samtools sort -@ {ntask} -m 8G -l 9 -o {bam_file} {sam_file}")
+    os.system(f"samtools sort -@ {ntask} -m 4G -l 9 -o {bam_file} {sam_file}")
     os.system(f"samtools index -@ {ntask} {bam_file}")
     os.system(f"rm {sam_file}")
 
@@ -82,6 +82,7 @@ def preprocess_read_helper(iter_args) -> None:
 
 
 def main() -> None:
+    # TODO: change this to load_args using docopt
     data_dir = Path(sys.argv[1])
     output_prefix = sys.argv[2]
     genome_index_dir = Path(sys.argv[3])
