@@ -16,8 +16,10 @@ git clone git@github.com:FischyM/NetCIS.git
 ```bash
 conda create -n netcis python=3.10
 conda activate netcis
-conda install numpy pandas scipy networkx seaborn docopt
+conda install numpy pandas scipy networkx seaborn docopt pysam
 ```
+
+You will also need cutadapt, bowtie2, and samtools to be accesible from the command line.
 
 ## Prepare data
 

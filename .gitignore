@@ -1,6 +1,7 @@
 toy-data/2020_SB-bam/*
 toy-data/2020_SB-insertions/*
 toy-data/2020_SB-graphs/*
+2020_SB/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
