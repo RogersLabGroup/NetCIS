@@ -69,7 +69,7 @@ def get_insertion_properties(insertion, chrdict) -> pd.DataFrame:
     return res
 
 
-def read_is_quality(read, is_irr, chr_dict) -> bool:
+def read_is_quality(read, chr_dict) -> bool:
     # that is paired
     if not read.is_paired:
         return False
@@ -83,20 +83,13 @@ def read_is_quality(read, is_irr, chr_dict) -> bool:
         return False
 
     # check if read is forward (+) or reverse (-), then see if 'TA' is present with respects to IRR/IRL orientation
-    if read.is_forward:
-        if is_irr:  # +, IRR, then starts with TA
-            if read.get_forward_sequence()[:2] == "TA":
-                return True
-        else:  # +, IRL, then ends with TA
-            if read.get_forward_sequence()[:-2] == "TA":
-                return True
+    if read.is_forward:  # forward 5' - 3'
+        if read.get_forward_sequence()[:2] == "TA":
+            return True
     else:
-        if is_irr:  # -, IRR, then ends with TA
-            if read.get_forward_sequence()[:-2] == "TA":
-                return True
-        else:  # -, IRL, then starts with TA
-            if read.get_forward_sequence()[:2] == "TA":
-                return True
+        if read.get_forward_sequence()[:-2] == "TA":
+            return True
+
 
     return False
 
@@ -115,7 +108,7 @@ def process_bam(file, chr_dict, is_irr) -> pd.DataFrame | None:
         if not read1.is_read1:
             continue
         # if the read1 is a quality read, then get the insertions properties
-        if read_is_quality(read1, is_irr, chr_dict):
+        if read_is_quality(read1, chr_dict):
             insert_properties = get_insertion_properties(read1, chr_dict)
             insertions.append(insert_properties)
         # check if read 2 (the mate read) is quality and can be used for insertion properties
@@ -131,7 +124,7 @@ def process_bam(file, chr_dict, is_irr) -> pd.DataFrame | None:
                 continue
 
             # then check if the read2 is a quality read and get the insertion properties
-            if read_is_quality(read2, is_irr, chr_dict):
+            if read_is_quality(read2, chr_dict):
                 insert_properties = get_insertion_properties(read2, chr_dict)
                 insertions.append(insert_properties)
 
