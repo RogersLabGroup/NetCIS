@@ -9,20 +9,43 @@ import pandas as pd
 # TODO: this is hard-coded, can either keep this or give command line parameters for this...
 # I think I might keep it hard-coded, as it is easy for inexperienced users to misspell input args
 
-# TODO: could also only take in the two forward adaptors and use biopython to get the reverse compliment
-# primers used to generate libraries
-# IRL primer - adaptor1
-# IRR primer - adaptor1
-# so this is 3 unique tags, but need a totalt of 6 including reverse compliments of tags
-# Write this up in manuscript very specificaly
-forward_5_adaptor = "GTATGTAAACTTCCGACTTCAACTG"  # adaptor
-reverse_5_adaptor = "GTAATACGACTCACTATAGGGCTCCGCTTAAGGGAC"  # trnp
-forward_3_adaptor = "GTCCCTTAAGCGGAGCCCTATAGTGAGTCGTATTAC"  # trnp
-reverse_3_adaptor = "CAGTTGAAGTCGGAAGTTTACATAC"  # adaptor
+# # TODO: could also only take in the two forward adaptors and use biopython to get the reverse compliment
+# forward_5_adaptor = "GTATGTAAACTTCCGACTTCAACTG"
+# reverse_5_adaptor = "GTAATACGACTCACTATAGGGCTCCGCTTAAGGGAC"
+# forward_3_adaptor = "GTCCCTTAAGCGGAGCCCTATAGTGAGTCGTATTAC"
+# reverse_3_adaptor = "CAGTTGAAGTCGGAAGTTTACATAC"
 
 
-def preprocess_reads(read_f, read_r, mysample_file, ntask, genome_index_dir) -> None:
+# TODO: biopython for reverse compliment of reverse 3'
+# input sequences are 5' - 3' by standard
+irr_tpn = "GGATTAAATGTCAGGAATTGTGAAAA"
+irl_tpn = "AAATTTGTGGAGTAGTTGAAAAACGA"
+adaptor = "TACCCATACGACGTCCCAGA"
+
+# r_c is reverse complement
+irr_tpn_r_c = ""
+irl_tpn_r_c = ""
+adaptor_r_c = ""
+
+
+# TODO: biopython for reverse compliment of reverse 3'
+# input sequences are 5' - 3' by standard
+irr_tpn = "GGATTAAATGTCAGGAATTGTGAAAA"
+irl_tpn = "AAATTTGTGGAGTAGTTGAAAAACGA"
+adaptor = "TACCCATACGACGTCCCAGA"
+
+# r_c is reverse complement
+irr_tpn_r_c = ""
+irl_tpn_r_c = ""
+adaptor_r_c = ""
+
+
+def preprocess_reads(tpn, adaptor, read_f, read_r, mysample_file, ntask, genome_index_dir) -> None:
     """Process forward and reverse reads ---> trim adaptors ---> map reads"""
+    
+    # TODO: make reverse complements of transposon and adaptor
+    tpn_r_c = ""
+    adaptor_r_c = ""
 
     # append temp names to the trimmed files
     trim_f1 = read_f.with_stem("5trim-" + read_f.name)
@@ -37,6 +60,10 @@ def preprocess_reads(read_f, read_r, mysample_file, ntask, genome_index_dir) -> 
     sam_file = mysample_file.with_suffix(".sam")
     bam_file = mysample_file.with_suffix(".bam")
 
+    # TODO: find the difference between cutadapt in this sequential way, or as a one shot
+    # how many lines are left in the final fastq file?
+    
+    
     # TODO: make sure cutadapt is cutting tags the way we want it to. Write this up in manuscript very specifically
     # https://cutadapt.readthedocs.io/en/stable/guide.html#id4
     # --front or -g
@@ -61,6 +88,8 @@ def preprocess_reads(read_f, read_r, mysample_file, ntask, genome_index_dir) -> 
     os.system(f"rm {trim_f2}")
     os.system(f"rm {trim_r2}")
 
+    # TODO: what is the bowtie2 QC of mapped reads using cutadapt sequential or as a one shot
+    # TODO: for fun, what is the QC with the wrong sequences?
     os.system(
         f"bowtie2 -p {ntask} --local --quiet -x {genome_index_dir} -q -1 {trim_f3} -2 {trim_r3} -S {sam_file}"
     )
