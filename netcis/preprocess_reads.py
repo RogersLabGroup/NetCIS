@@ -10,10 +10,15 @@ import pandas as pd
 # I think I might keep it hard-coded, as it is easy for inexperienced users to misspell input args
 
 # TODO: could also only take in the two forward adaptors and use biopython to get the reverse compliment
-forward_5_adaptor = "GTATGTAAACTTCCGACTTCAACTG"
-reverse_5_adaptor = "GTAATACGACTCACTATAGGGCTCCGCTTAAGGGAC"
-forward_3_adaptor = "GTCCCTTAAGCGGAGCCCTATAGTGAGTCGTATTAC"
-reverse_3_adaptor = "CAGTTGAAGTCGGAAGTTTACATAC"
+# primers used to generate libraries
+# IRL primer - adaptor1
+# IRR primer - adaptor1
+# so this is 3 unique tags, but need a totalt of 6 including reverse compliments of tags
+# Write this up in manuscript very specificaly
+forward_5_adaptor = "GTATGTAAACTTCCGACTTCAACTG"  # adaptor
+reverse_5_adaptor = "GTAATACGACTCACTATAGGGCTCCGCTTAAGGGAC"  # trnp
+forward_3_adaptor = "GTCCCTTAAGCGGAGCCCTATAGTGAGTCGTATTAC"  # trnp
+reverse_3_adaptor = "CAGTTGAAGTCGGAAGTTTACATAC"  # adaptor
 
 
 def preprocess_reads(read_f, read_r, mysample_file, ntask, genome_index_dir) -> None:
@@ -32,6 +37,7 @@ def preprocess_reads(read_f, read_r, mysample_file, ntask, genome_index_dir) -> 
     sam_file = mysample_file.with_suffix(".sam")
     bam_file = mysample_file.with_suffix(".bam")
 
+    # TODO: make sure cutadapt is cutting tags the way we want it to. Write this up in manuscript very specifically
     # https://cutadapt.readthedocs.io/en/stable/guide.html#id4
     # --front or -g
     # -G is for read 2 (reverse)

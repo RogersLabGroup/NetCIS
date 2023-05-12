@@ -70,6 +70,7 @@ def get_insertion_properties(insertion, chrdict) -> pd.DataFrame:
 
 
 def read_is_quality(read, is_irr, chr_dict) -> bool:
+    # TODO: create dataframe for each insertion where they would fail in a quality check?
     # that is paired
     if not read.is_paired:
         return False
@@ -119,7 +120,9 @@ def process_bam(file, chr_dict, is_irr) -> pd.DataFrame | None:
             insert_properties = get_insertion_properties(read1, chr_dict)
             insertions.append(insert_properties)
         # check if read 2 (the mate read) is quality and can be used for insertion properties
-        else:  # TODO: could be here to check if both reads are quality and match in their reads, then make is a super duper read!
+        else:  
+            # TODO: could be here to check if both reads are quality and match in their reads, then make is a super duper read!
+            # TODO: check mapq as a QC check point
             # must have a mate read that is mapped for .mate() to return properly
             if read1.mate_is_unmapped or (not read1.is_paired):
                 continue

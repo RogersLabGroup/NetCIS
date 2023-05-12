@@ -13,7 +13,7 @@ def load_args() -> dict:
     Generate common insertion sites (CIS) using a network (graph) based approach. 
     The only parameter that will change how a CIS is generated can be control with --threshold
     
-    Usage: cis_networks.py --output_prefix DIR [options]
+    Usage: python cis_networks.py --output_prefix DIR [options]
     
      --output_prefix=DIR            a prefix of the output directory that will have "-graphs" appended to it
 
@@ -94,7 +94,7 @@ def create_graph(chrom_df: DataFrame, threshold, save_file, verbose=0) -> None:
         #         G.add_edge(new_node, other_node, weight=1 / node_dist)
     
     # the following code does what is commented out above but I am keeping all of this in for a future user to reference
-    
+    # TODO: make ipynb for this so future users can step through the process
     # nodes are inherently ordered as they are added in the graph. 
     # however, the ordering doens't have to numerically make sense
     ordered_nodes = G.nodes()
@@ -110,7 +110,7 @@ def create_graph(chrom_df: DataFrame, threshold, save_file, verbose=0) -> None:
     dist_nodes = np.abs(nodes - nodes.T)  # symmetric 2d array
     
     # cis nodes are those that are under the threshold
-    cis_nodes = dist_nodes < threshold  # symmetric 2d array
+    cis_nodes = dist_nodes <= threshold  # symmetric 2d array
     
     # get the indices of the lower left triangle of the symmetric matrix.
     # edges_ind is a tuple of two array. The same index location in both arrays is used 
@@ -170,6 +170,12 @@ def main(args) -> None:
         insert_list.append(tmp_df)
     inserts_df = concat(insert_list, ignore_index=True)
 
+    # TODO: how are we choosing case and controls?
+    # TODO: create another script to compare the union vs intersection of insertions between left and right tumors
+    # also then look at and compare insertions counts of intersection of insertions and the not intersection (Laura, 5/11/23)
+    # or more formally, the disjointed insertions
+    
+    
     # separate data into case/controls
     insert_case = inserts_df[inserts_df["tumor type"] == "S"]
     insert_control = inserts_df[inserts_df["tumor type"] != "S"]

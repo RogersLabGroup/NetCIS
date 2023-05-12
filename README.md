@@ -14,10 +14,12 @@ git clone git@github.com:FischyM/NetCIS.git
 ## Create python environment
 
 ```bash
-conda create -n netcis python=3.10
+conda create -n netcis python=3.10 numpy pandas scipy networkx seaborn docopt jupyterlab
 conda activate netcis
-conda install numpy pandas scipy networkx seaborn docopt pysam
+pip install pysam
 ```
+
+Jupyterlab is optional and can be installed as needed.
 
 You will also need cutadapt, bowtie2, and samtools to be accesible from the command line.
 
