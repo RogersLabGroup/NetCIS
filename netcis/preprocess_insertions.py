@@ -40,6 +40,10 @@ chr_dict = {
 }
 
 
+def convert_mapq(x):
+    return np.power(10, x/(-10))
+
+
 def get_insertion_properties(insertion, chrdict) -> pd.DataFrame:
     """
     record the insertions stats (direction, +/-, and all that)
@@ -94,7 +98,7 @@ def read_is_quality(read, is_irr, chr_dict) -> bool:
 
     return False
 
-
+# TODO: add mapping error prob to convert to MapQ score to filter below
 def process_bam(file, chr_dict, is_irr) -> pd.DataFrame | None:
     """
     Filter out low quality insertions
