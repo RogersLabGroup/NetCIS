@@ -4,48 +4,29 @@ import os
 from multiprocessing import Pool
 
 import pandas as pd
+from Bio.Seq import Seq
 
 
 # TODO: this is hard-coded, can either keep this or give command line parameters for this...
-# I think I might keep it hard-coded, as it is easy for inexperienced users to misspell input args
-
-# # TODO: could also only take in the two forward adaptors and use biopython to get the reverse compliment
-# forward_5_adaptor = "GTATGTAAACTTCCGACTTCAACTG"
-# reverse_5_adaptor = "GTAATACGACTCACTATAGGGCTCCGCTTAAGGGAC"
-# forward_3_adaptor = "GTCCCTTAAGCGGAGCCCTATAGTGAGTCGTATTAC"
-# reverse_3_adaptor = "CAGTTGAAGTCGGAAGTTTACATAC"
-
-
-# TODO: biopython for reverse compliment of reverse 3'
 # input sequences are 5' - 3' by standard
-irr_tpn = "GGATTAAATGTCAGGAATTGTGAAAA"
-irl_tpn = "AAATTTGTGGAGTAGTTGAAAAACGA"
-adaptor = "TACCCATACGACGTCCCAGA"
+irr_tpn = Seq("GGATTAAATGTCAGGAATTGTGAAAA")
+irl_tpn = Seq("AAATTTGTGGAGTAGTTGAAAAACGA")
+adaptor = Seq("TACCCATACGACGTCCCAGA")
 
 # r_c is reverse complement
-irr_tpn_r_c = ""
-irl_tpn_r_c = ""
-adaptor_r_c = ""
-
-
-# TODO: biopython for reverse compliment of reverse 3'
-# input sequences are 5' - 3' by standard
-irr_tpn = "GGATTAAATGTCAGGAATTGTGAAAA"
-irl_tpn = "AAATTTGTGGAGTAGTTGAAAAACGA"
-adaptor = "TACCCATACGACGTCCCAGA"
-
-# r_c is reverse complement
-irr_tpn_r_c = ""
-irl_tpn_r_c = ""
-adaptor_r_c = ""
+irr_tpn_rc = irr_tpn.reverse_complement()
+irl_tpn_rc = irl_tpn.reverse_complement()
+adaptor_rc = adaptor.reverse_complement()
 
 
 def preprocess_reads(tpn, adaptor, read_f, read_r, mysample_file, ntask, genome_index_dir) -> None:
     """Process forward and reverse reads ---> trim adaptors ---> map reads"""
     
-    # TODO: make reverse complements of transposon and adaptor
-    tpn_r_c = ""
-    adaptor_r_c = ""
+    
+    # for read 1, we need to trim off tpn at 5'
+    # for read 2, we need to trim off tpn_rc at 3'
+    tpn_rc = tpn.reverse_complement()  # 3'
+    adaptor_rc = adaptor.reverse_complement()  # 3'
 
     # append temp names to the trimmed files
     trim_f1 = read_f.with_stem("5trim-" + read_f.name)
@@ -70,11 +51,13 @@ def preprocess_reads(tpn, adaptor, read_f, read_r, mysample_file, ntask, genome_
     # -G is for read 2 (reverse)
     # # -g is found by regular 5': Full adapter sequence anywhere, Partial adapter sequence at 5’ end, Full adapter sequence at 5’ end
     # # -g ^ is found by anchored 5': Full adapter sequence at 5’ end
-    os.system(
-        f"cutadapt --quiet -j {ntask} --discard-untrimmed -g {forward_5_adaptor} -o {trim_f1} -p {trim_r1} {read_f} {read_r}"
+    os.system(  # 5' read 1
+        # f"cutadapt --quiet -j {ntask} --discard-untrimmed -g {forward_5_adaptor} -o {trim_f1} -p {trim_r1} {read_f} {read_r}"
+        f"cutadapt --quiet -j {ntask} --discard-untrimmed -g {str(tpn)} -o {trim_f1} -p {trim_r1} {read_f} {read_r}"
     )
-    os.system(
-        f"cutadapt --quiet -j {ntask} -G ^{reverse_5_adaptor} -o {trim_f2} -p {trim_r2} {trim_f1} {trim_r1}"
+    os.system(  # 5' read 2
+        # f"cutadapt --quiet -j {ntask} -G ^{reverse_5_adaptor} -o {trim_f2} -p {trim_r2} {trim_f1} {trim_r1}"
+        f"cutadapt --quiet -j {ntask} -G ^{str(adaptor_rc)} -o {trim_f2} -p {trim_r2} {trim_f1} {trim_r1}"
     )
     os.system(f"rm {trim_f1}")
     os.system(f"rm {trim_r1}")
@@ -82,11 +65,15 @@ def preprocess_reads(tpn, adaptor, read_f, read_r, mysample_file, ntask, genome_
     # --adapter or -a
     # -A is for read 2 (reverse)
     # -a is found by regular 3: Full adapter sequence anywhere, Partial adapter sequence at 3’ end, Full adapter sequence at 3’ end
-    os.system(
-        f"cutadapt --quiet -j {ntask} -a {forward_3_adaptor} -A {reverse_3_adaptor} -o {trim_f3} -p {trim_r3} {trim_f2} {trim_r2}"
+    os.system(  # 3' read 1, then 3' read 2
+        # f"cutadapt --quiet -j {ntask} -a {forward_3_adaptor} -A {reverse_3_adaptor} -o {trim_f3} -p {trim_r3} {trim_f2} {trim_r2}"
+        f"cutadapt --quiet -j {ntask} -a {str(adaptor)} -A {str(tpn_rc)} -o {trim_f3} -p {trim_r3} {trim_f2} {trim_r2}"
+
     )
     os.system(f"rm {trim_f2}")
     os.system(f"rm {trim_r2}")
+    # TODO: what are the total lines left?
+
 
     # TODO: what is the bowtie2 QC of mapped reads using cutadapt sequential or as a one shot
     # TODO: for fun, what is the QC with the wrong sequences?
@@ -110,10 +97,10 @@ def preprocess_read_helper(iter_args) -> None:
     irr_R = data_dir / row[4]
 
     irl_file = bam_output_dir / (mysample + "_IRL")
-    preprocess_reads(irl_F, irl_R, irl_file, ntask, genome_index_dir)
+    preprocess_reads(irl_tpn, adaptor, irl_F, irl_R, irl_file, ntask, genome_index_dir)
 
     irr_file = bam_output_dir / (mysample + "_IRR")
-    preprocess_reads(irr_F, irr_R, irr_file, ntask, genome_index_dir)
+    preprocess_reads(irr_tpn, adaptor, irr_F, irr_R, irr_file, ntask, genome_index_dir)
 
 
 def main() -> None:
