@@ -14,7 +14,7 @@ git clone git@github.com:FischyM/NetCIS.git
 ## Create python environment
 
 ```bash
-conda create -n netcis python=3.10 numpy pandas scipy networkx seaborn docopt jupyterlab
+conda create -n netcis python=3.10 numpy pandas scipy networkx seaborn docopt jupyterlab tqdm Biopython
 conda activate netcis
 pip install pysam
 ```

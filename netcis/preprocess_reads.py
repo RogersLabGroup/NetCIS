@@ -83,7 +83,6 @@ def main() -> None:
     iter_args = tqdm(iter_args)
     with Pool(npara) as p:
         res = [ x for x in p.imap_unordered(preprocess_read_helper, iter_args) ]
-    print("\nDone")
     
 if __name__ == "__main__":
     main()

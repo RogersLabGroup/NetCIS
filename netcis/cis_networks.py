@@ -1,25 +1,26 @@
 from pathlib import Path
 from multiprocessing import Pool
 from typing import Generator
+import sys
 
 from docopt import docopt
 import numpy as np
 from pandas import read_csv, concat, DataFrame
 import networkx as nx
 
-
+    
 def load_args() -> dict:
-    doc = """
+    doc = """  
     Generate common insertion sites (CIS) using a network (graph) based approach. 
     The only parameter that will change how a CIS is generated can be control with --threshold
     
-    Usage: python cis_networks.py --output_prefix DIR [options]
+    Usage: cis_networks.py --output_prefix DIR [options]
     
      --output_prefix=DIR            a prefix of the output directory that will have "-graphs" appended to it
 
     Options:
      -h --help                      show this help message and exit
-     --verbose=N                    print more verbose information using 1 or 2 [default: 0]
+     --verbose=N                    print more verbose information using 0, 1 or 2 [default: 0]
      --jobs=N                       number of processes to run [default: 1]
      --threshold=N                  maximum distance to connect two insertions together in the CIS network. We suggest not going over the default value [default: 50000]
     """
@@ -193,5 +194,6 @@ def main(args) -> None:
     with Pool(jobs) as p:
         [ x for x in p.imap_unordered(create_graph_helper, iter_gen) ]
         
-if __name__ == "__main__":
+if __name__ == "__main__": 
     main(load_args())
+    
