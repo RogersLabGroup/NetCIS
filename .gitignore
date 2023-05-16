@@ -1,7 +1,9 @@
-toy-data/2020_SB-bam/*
-toy-data/2020_SB-insertions/*
-toy-data/2020_SB-graphs/*
+toy-data/
+!toy-data/2020_SB-fastq
 2020_SB/
+
+nohup.out
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

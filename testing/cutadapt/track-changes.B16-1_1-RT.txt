@@ -1,9 +1,58 @@
 B16-1_1-RT
 
 
+Summary: 
+  IRL reads: 11/1856  (10 > 1 times aligned concordantly)
+  IRR reads: 307/1814  (42 > 1 times aligned concordantly)
+Orig with correct tags
 
+1856 reads; of these:
+  1856 (100.00%) were paired; of these:
+    1845 (99.41%) aligned concordantly 0 times
+    1 (0.05%) aligned concordantly exactly 1 time
+    10 (0.54%) aligned concordantly >1 times
+    ----
+    1845 pairs aligned concordantly 0 times; of these:
+      0 (0.00%) aligned discordantly 1 time
+    ----
+    1845 pairs aligned 0 times concordantly or discordantly; of these:
+      3690 mates make up the pairs; of these:
+        3689 (99.97%) aligned 0 times
+        0 (0.00%) aligned exactly 1 time
+        1 (0.03%) aligned >1 times
+0.62% overall alignment rate
+[bam_sort_core] merging from 0 files and 8 in-memory blocks...
+IRL
+########################################################################
+IRR
+---------------------------
+---------------------------
+---------------------------
+1814 reads; of these:
+  1814 (100.00%) were paired; of these:
+    1700 (93.72%) aligned concordantly 0 times
+    72 (3.97%) aligned concordantly exactly 1 time
+    42 (2.32%) aligned concordantly >1 times
+    ----
+    1700 pairs aligned concordantly 0 times; of these:
+      193 (11.35%) aligned discordantly 1 time
+    ----
+    1507 pairs aligned 0 times concordantly or discordantly; of these:
+      3014 mates make up the pairs; of these:
+        2845 (94.39%) aligned 0 times
+        122 (4.05%) aligned exactly 1 time
+        47 (1.56%) aligned >1 times
+21.58% overall alignment rate
+[bam_sort_core] merging from 0 files and 8 in-memory blocks...
+
+
+
+
+
+Summary: 
+  IRL reads: 23/1697  (22 > 1 times aligned)
+  IRR reads: 656/866  (221 > 1 times aligned)
 f"cutadapt -j {ntask} --report=minimal --discard-untrimmed -g {tpn} -G {adaptor_rc} -a {adaptor} -A {tpn_rc} -o {trim_f3} -p {trim_r3} {read_f} {read_r}"
-
 
 status	in_reads	in_bp	too_short	too_long	too_many_n	out_reads	w/adapters	qualtrim_bp	out_bp	w/adapters2	qualtrim2_bp	out2_bp
 WARN	1453423	438933746	0	0	0	1697	51006	0	248621	27867	0	251113
@@ -52,56 +101,9 @@ WARN	1165602	352011804	0	0	0	866	36553	0	127105	48820	0	127973
 
 
 
-f"cutadapt -j {ntask} --report=minimal --discard-untrimmed -a {tpn}...{adaptor} -A {tpn_r}...{adaptor_r} -o {trim_f3} -p {trim_r3} {read_f} {read_r}"
-
-
-status	in_reads	in_bp	too_short	too_long	too_many_n	out_reads	w/adapters	qualtrim_bp	out_bp	w/adapters2	qualtrim2_bp	out2_bp
-OK	1453423	438933746	0	0	0	1556	51006	0	224729	143629	0	230224
----------------------------
-1556 reads; of these:
-  1556 (100.00%) were paired; of these:
-    1546 (99.36%) aligned concordantly 0 times
-    1 (0.06%) aligned concordantly exactly 1 time
-    9 (0.58%) aligned concordantly >1 times
-    ----
-    1546 pairs aligned concordantly 0 times; of these:
-      0 (0.00%) aligned discordantly 1 time
-    ----
-    1546 pairs aligned 0 times concordantly or discordantly; of these:
-      3092 mates make up the pairs; of these:
-        3091 (99.97%) aligned 0 times
-        1 (0.03%) aligned exactly 1 time
-        0 (0.00%) aligned >1 times
-0.67% overall alignment rate
-[bam_sort_core] merging from 0 files and 8 in-memory blocks...
-IRL
-########################################################################
-IRR
-status	in_reads	in_bp	too_short	too_long	too_many_n	out_reads	w/adapters	qualtrim_bp	out_bp	w/adapters2	qualtrim2_bp	out2_bp
-OK	1165602	352011804	0	0	0	705	36553	0	102902	30720	0	104118
----------------------------
-705 reads; of these:
-  705 (100.00%) were paired; of these:
-    262 (37.16%) aligned concordantly 0 times
-    416 (59.01%) aligned concordantly exactly 1 time
-    27 (3.83%) aligned concordantly >1 times
-    ----
-    262 pairs aligned concordantly 0 times; of these:
-      17 (6.49%) aligned discordantly 1 time
-    ----
-    245 pairs aligned 0 times concordantly or discordantly; of these:
-      490 mates make up the pairs; of these:
-        477 (97.35%) aligned 0 times
-        8 (1.63%) aligned exactly 1 time
-        5 (1.02%) aligned >1 times
-66.17% overall alignment rate
-[bam_sort_core] merging from 0 files and 8 in-memory blocks...
-
-
-
-
-
-
+Summary: 
+  IRL reads: 21/608  (17 > 1 times aligned)
+  IRR reads: 501/909  (221 > 1 times aligned)
 f"cutadapt -j {ntask} --report=minimal --discard-untrimmed -a {tpn}...{adaptor} -A {adaptor_rc}...{tpn_rc} -o {trim_f3} -p {trim_r3} {read_f} {read_r}"
 
 
@@ -145,5 +147,58 @@ OK	1165602	352011804	0	0	0	909	36553	0	125827	39356	0	134463
         23 (2.82%) aligned exactly 1 time
         11 (1.35%) aligned >1 times
 56.99% overall alignment rate
+[bam_sort_core] merging from 0 files and 8 in-memory blocks...
+
+
+
+
+
+
+Summary: 
+  IRL reads: 10/1556  (9 > 1 times aligned)
+  IRR reads: 460/705  (27 > 1 times aligned)
+f"cutadapt -j {ntask} --report=minimal --discard-untrimmed -a {tpn}...{adaptor} -A {tpn_r}...{adaptor_r} -o {trim_f3} -p {trim_r3} {read_f} {read_r}"
+
+
+status	in_reads	in_bp	too_short	too_long	too_many_n	out_reads	w/adapters	qualtrim_bp	out_bp	w/adapters2	qualtrim2_bp	out2_bp
+OK	1453423	438933746	0	0	0	1556	51006	0	224729	143629	0	230224
+---------------------------
+1556 reads; of these:
+  1556 (100.00%) were paired; of these:
+    1546 (99.36%) aligned concordantly 0 times
+    1 (0.06%) aligned concordantly exactly 1 time
+    9 (0.58%) aligned concordantly >1 times
+    ----
+    1546 pairs aligned concordantly 0 times; of these:
+      0 (0.00%) aligned discordantly 1 time
+    ----
+    1546 pairs aligned 0 times concordantly or discordantly; of these:
+      3092 mates make up the pairs; of these:
+        3091 (99.97%) aligned 0 times
+        1 (0.03%) aligned exactly 1 time
+        0 (0.00%) aligned >1 times
+0.67% overall alignment rate
+[bam_sort_core] merging from 0 files and 8 in-memory blocks...
+IRL
+########################################################################
+IRR
+status	in_reads	in_bp	too_short	too_long	too_many_n	out_reads	w/adapters	qualtrim_bp	out_bp	w/adapters2	qualtrim2_bp	out2_bp
+OK	1165602	352011804	0	0	0	705	36553	0	102902	30720	0	104118
+---------------------------
+705 reads; of these:
+  705 (100.00%) were paired; of these:
+    262 (37.16%) aligned concordantly 0 times
+    416 (59.01%) aligned concordantly exactly 1 time
+    27 (3.83%) aligned concordantly >1 times
+    ----
+    262 pairs aligned concordantly 0 times; of these:
+      17 (6.49%) aligned discordantly 1 time
+    ----
+    245 pairs aligned 0 times concordantly or discordantly; of these:
+      490 mates make up the pairs; of these:
+        477 (97.35%) aligned 0 times
+        8 (1.63%) aligned exactly 1 time
+        5 (1.02%) aligned >1 times
+66.17% overall alignment rate
 [bam_sort_core] merging from 0 files and 8 in-memory blocks...
 

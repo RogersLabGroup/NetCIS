@@ -16,8 +16,9 @@ bowtieIndex="/research/labs/immunology/rogerslm/tools/bowtie2_indexes/GRCm39/GRC
 input="toy-data/input.tsv"
 python netcis/preprocess_reads.py $fastq $output_prefix $bowtieIndex $ntasks $npara $input
 
-njobs=$((ntasks * npara))
-python netcis/preprocess_insertions.py $output_prefix $njobs $input
+# njobs=$((ntasks * npara))
+# mapq_thresh=0.05
+# python netcis/preprocess_insertions.py $output_prefix $njobs $input $mapq_thresh
 
-thres=50000
-python netcis/cis_networks.py --output_prefix $output_prefix --threshold $thres --jobs $njobs
+# edge_thresh=50000
+# python netcis/cis_networks.py --output_prefix $output_prefix --threshold $edge_thresh --jobs $njobs
