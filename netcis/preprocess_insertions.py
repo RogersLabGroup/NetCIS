@@ -72,7 +72,6 @@ def get_insertion_properties(insertion, chrdict) -> pd.DataFrame:
     return res
 
 def read_is_quality(read, mapq_thres, chr_dict) -> bool:
-    # TODO: create dataframe for each insertion where they would fail in a quality check?
     # that is paired
     if not read.is_paired:
         return False
@@ -90,14 +89,19 @@ def read_is_quality(read, mapq_thres, chr_dict) -> bool:
         return False
 
     # check if read is forward (+) or reverse (-), then see if 'TA' is present with respects to IRR/IRL orientation
+    # TODO: when everything else is set, compare IRL and IRR insertions if we assume the TA is at the beginning of the forward seq
+    
     if read.is_forward:  # forward 5' - 3'
         if read.get_forward_sequence()[:2] == "TA":
             return True
-    else:
+    elif not read.is_forward:
         if read.get_forward_sequence()[:-2] == "TA":
             return True
-
-    return False
+        
+    # TODO: create dataframe for each insertion that are quality, but don't have a TA where we expect
+    # and visualize proportion of TA and non-TA
+    else:
+        return False
 
 def process_bam(file, mapq_thres, chr_dict) -> pd.DataFrame | None:
     """

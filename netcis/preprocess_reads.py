@@ -37,6 +37,8 @@ def preprocess_reads(tpn, adaptor, read_f, read_r, mysample_file, ntask, genome_
     # -a is found by regular 3: Full adapter sequence anywhere, Partial adapter sequence at 3’ end, Full adapter sequence at 3’ end
     os.system(
         f"cutadapt -j {ntask} --quiet --discard-untrimmed -g {tpn} -G {adaptor_rc} -a {adaptor} -A {tpn_rc} -o {trim_f} -p {trim_r} {read_f} {read_r}"
+        # TODO: look at this other cutadapt again once I have bowtie analysis set
+        # cutadapt -a ^FWDPRIMER...RCREVPRIMER -A ^REVPRIMER...RCFWDPRIMER --discard-untrimmed -o out.1.fastq.gz -p out.2.fastq.gz in.1.fastq.gz in.2.fastq.gz
     )
     os.system(
         f"bowtie2 -p {ntask} --local -x {genome_index_dir} -q -1 {trim_f} -2 {trim_r} -S {sam_file} > {bowtie_file} 2>&1"
