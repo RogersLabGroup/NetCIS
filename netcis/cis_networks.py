@@ -27,9 +27,9 @@ def load_args() -> dict:
     """
 
     # remove "--" from args
-    new_args = { new_args[key.split("-")[-1]]: value for key, value in docopt(doc).items() }
+    new_args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
 
-    int_opts = ["jobs", "verbose", "threshold"]
+    int_opts = ["verbose", "threshold", "jobs"]
     for opts in int_opts:
         new_args[opts] = int(new_args[opts])
 
@@ -40,14 +40,15 @@ def load_args() -> dict:
 
 def add_nodes(insertion_df):
     def add_node(insert):
-        node = f"{insert.pos}|{insert.tpn_promoter_orient}"
+        node = insert.pos
         attr = {
-            "counts": insert.count,
-            "counts_irr": insert.count_irr,
-            "counts_irl": insert.count_irl,
-            "orient": insert.tpn_promoter_orient,
-            "chrom": insert.chr,
             "position": insert.pos,
+            "chrom": insert.chr,
+            "counts": insert.counts,
+            "counts_irr": insert.counts_irr,
+            "counts_irl": insert.counts_irl,
+            "counts_trp_orient_pos": insert.counts_trp_orient_pos,
+            "counts_trp_orient_neg": insert.counts_trp_orient_neg,
         }
         return (node, attr)
     return [ add_node(x) for x in insertion_df.itertuples() ]
@@ -79,17 +80,13 @@ def find_edges(ordered_nodes, threshold):
     """ 
     # nodes are inherently ordered as they are added in the graph,
     # however, the ordering doens't have to numerically make sense for this function
-
-
-    # remove the transposon orientation from the end of the node name
-    tmp_order = [ int(x.split("|")[0]) for x in ordered_nodes ]
-    # check if this changes the number of unique nodes.
-    # If we have + and - at the same location, this assert will fail.
-    # This isn't a bad thing but I want to know when it is happening
-    assert len(np.unique(ordered_nodes)) == len(np.unique(tmp_order))
     
-    # cast the nodes into a numpy array that can be used to broadcast into a symmetric matrix of distances
-    nodes = np.array(tmp_order).reshape(-1, 1)
+    
+    # set up the nodes to be a numpy array for easy indexing
+    ordered_nodes = np.array(ordered_nodes)  # 1d array
+    
+    # reshape nodes to be used to broadcast into a symmetric matrix of distances
+    nodes = ordered_nodes.reshape(-1, 1)
     dist_nodes = np.abs(nodes - nodes.T)  # symmetric 2d array
     
     # cis nodes are those that are under the threshold
@@ -104,9 +101,6 @@ def find_edges(ordered_nodes, threshold):
     # keep nodes that are under the threshold
     keep_nodes = cis_nodes[edges_ind]  # 1d array
     
-    # set up the nodes to be a numpy array for easy indexing
-    ordered_nodes = np.array(ordered_nodes)  # 1d array
-    
     # get the actual node names for the lower left triangle via as the column
     nodes1 = ordered_nodes[edges_ind[1][keep_nodes]]  # 1d array
     # the rows
@@ -120,28 +114,13 @@ def find_edges(ordered_nodes, threshold):
 
 def create_graph(chrom_df: DataFrame, threshold, save_file, verbose=0) -> None:
     G = nx.Graph()
-    
-    # prepare the insertions by grouping them together
-    # find the total count of insertions and the counts per sequencing library (IRR/IRL)
-    insert_cols = ['chr', 'pos', 'tpn_promoter_orient', 'library']
-    tmp = chrom_df.groupby(by=insert_cols, as_index=False, dropna=False)['read_name'].count()
-    tmp['count'] = tmp.pop('read name')
-    count_irr = np.where(tmp['library'] == 'IRR', tmp['count'], 0)
-    count_irl = np.where(tmp['library'] == 'IRL', tmp['count'], 0)
-    tmp.insert(5, "count_irr", count_irr)
-    tmp.insert(6, "count_irl", count_irl)
-    
-    # group insertions without the sequencing library. 
-    # As long as the transposon orientation, chromosome, and position are the same, 
-    # then it does not matter which library the insertion came from
-    node_cols = ['chr', 'pos', 'tpn_promoter_orient']
-    insertion_nodes = tmp.groupby(by=node_cols, as_index=False, dropna=False).sum(numeric_only=True)
-    insertion_nodes['read_names'] = chrom_df.groupby(by=node_cols, dropna=False, group_keys=False)['read_name'].apply(list).reset_index(drop=True)
-    
-    # TODO: for some reason there are few insertions that occur both in IRR and IRL. 
-    # Why is that and does this change with the new preprocessing scripts?
-    # both_libs = insertion_nodes[ (insertion_nodes['count_irl'] != 0) & (insertion_nodes['count_irr'] != 0) ]
-    
+    chrom_df.insert(4, "counts_irr", np.where(chrom_df['library'] == 'IRR', 1, 0))
+    chrom_df.insert(5, "counts_irl", np.where(chrom_df['library'] == 'IRL', 1, 0))
+    chrom_df.insert(6, "counts_trp_orient_pos", np.where(chrom_df['tpn_promoter_orient'] == '+', 1, 0))
+    chrom_df.insert(7, "counts_trp_orient_neg", np.where(chrom_df['tpn_promoter_orient'] == '-', 1, 0))
+    insertion_nodes = chrom_df.groupby(by=['chr', 'pos'], as_index=False, dropna=False)[["counts_irr", "counts_irl", "counts_trp_orient_pos", "counts_trp_orient_neg"]].sum()
+    insertion_nodes.insert(2, "counts", chrom_df.groupby(by=['chr', 'pos'], as_index=False, dropna=False)['read_name'].count().pop('read_name'))
+
     # add nodes and edges to graph
     G.add_nodes_from(add_nodes(insertion_nodes))
     G.add_edges_from(find_edges(G.nodes(), threshold))
@@ -156,7 +135,7 @@ def create_graph_helper(iter_args) -> None:
     
 def create_graph_generator(chrom_list, insert_case, insert_control, threshold, case_dir, control_dir) -> Generator[tuple, None, None]:
     for chrom in chrom_list:
-        print(chrom)
+        # print(chrom)
         insert_case_chrom = insert_case[insert_case['chr'] == chrom]    
         insert_control_chrom = insert_control[insert_control['chr'] == chrom]
         case_file = case_dir / f"{chrom}.graphml"
@@ -173,20 +152,14 @@ def main(args) -> None:
     # get all files in data dir, load each file as pandas.DataFrame, and add meta data based on the file name
     insert_list = []
     for file in args["insertion_dir"].iterdir():
-        tmp_df = read_csv(file)  # TODO: load .tsv
-        
-        tumor_model, sample_id, tumor_tmp = file.name.split("-")
-        tissue_type, lib_tmp = tumor_tmp.split("_")
-        library = lib_tmp.split(".")[0]
-    
+        tmp_df = read_csv(file, sep="\t")
+        tumor_model, sample_id, tissue_type = file.name.split("-")
         tmp_df["tumor_model"] = tumor_model
         tmp_df["sample_id"] = sample_id
-        tmp_df["tissue"] = tissue_type  # RT/LT/S
-        tmp_df["library"] = library  # IRR/IRL
-    
+        tmp_df["tissue"] = tissue_type.split(".")[0]  # RT/LT/S
         insert_list.append(tmp_df)
-        
     inserts_df = concat(insert_list, ignore_index=True)
+
 
     # TODO: how are we choosing case and controls?
     # TODO: create another script to compare the union vs intersection of insertions between left and right tumors
@@ -200,6 +173,7 @@ def main(args) -> None:
 
     # get all chromosomes to separate further the case/controls dataframes
     chrom_list = np.unique(inserts_df["chr"].to_numpy())
+    
     # don't allow more jobs than there are chromosomes
     jobs = args["jobs"]
     if len(chrom_list) < jobs:
@@ -210,7 +184,8 @@ def main(args) -> None:
     iter_gen = create_graph_generator(chrom_list, insert_case, insert_control, args['threshold'], out_dir_case, out_dir_control)
     iter_gen = tqdm(iter_gen)
     with Pool(jobs) as p:
-        [ x for x in p.imap_unordered(create_graph_helper, iter_gen) ]
+        for _ in p.imap_unordered(create_graph_helper, iter_gen):
+            pass
         p.close()
         
 if __name__ == "__main__": 

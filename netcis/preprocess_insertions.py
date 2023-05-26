@@ -29,7 +29,7 @@ def load_args() -> dict:
     """
     
     # remove "--" from args
-    new_args = { new_args[key.split("-")[-1]]: value for key, value in docopt(doc).items() }
+    new_args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
     
     # files and directory args
     new_args["bam_output"] = Path(new_args["output_prefix"] + "-bam")
@@ -185,16 +185,16 @@ def process_bam_helper(iter_args) -> None:
     # find quality insertion in IRR and IRL libraries and convert them to single insertion site format
     inserts_irl_df = process_bam(file=irl_bam, mapq_thres=thres, chr_dict=chr_dict)
     if (inserts_irl_df is not None):  # if no insertions present, process_bam returns None
-        inserts_irl_df["seq_library"] = "IRL"
+        inserts_irl_df["library"] = "IRL"
         # set transposon promoter orientation depending on sequencing library
         # For IRR: + if forward, - if not. For IRL this is reversed. Also, make the orientations easier to read (+/-)
         inserts_irl_df["tpn_promoter_orient"] = ~inserts_irl_df["tpn_promoter_orient"]
         inserts_irl_df["strand"] = np.where(inserts_irl_df["strand"], "+", "-")
-        inserts_irl_df["tpn_promoter_orient"] = np.where(inserts_irl_df["tpn_promoter_orient +"], "+", "-")
+        inserts_irl_df["tpn_promoter_orient"] = np.where(inserts_irl_df["tpn_promoter_orient"], "+", "-")
     
     inserts_irr_df = process_bam(file=irr_bam, mapq_thres=thres, chr_dict=chr_dict)
     if (inserts_irr_df is not None):  # if no insertions present, process_bam returns None
-        inserts_irr_df["seq_library"] = "IRR"
+        inserts_irr_df["library"] = "IRR"
         inserts_irr_df["strand"] = np.where(inserts_irr_df["strand"], "+", "-")
         inserts_irr_df["tpn_promoter_orient"] = np.where(inserts_irr_df["tpn_promoter_orient"], "+", "-")
 
@@ -212,7 +212,7 @@ def process_bam_helper(iter_args) -> None:
 def main() -> None:
     main_args = load_args()
     files_df = pd.read_csv(main_args["input"], sep="\t", header=None)
-    iter_args = tqdm([ (row[1], main_args) for row in files_df.itertuples() ])
+    iter_args = tqdm([ (row[1], main_args) for row in files_df.iterrows() ])
     with Pool(main_args["njobs"]) as p:
         [ x for x in p.imap_unordered(process_bam_helper, iter_args) ]
         p.close()

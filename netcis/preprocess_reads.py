@@ -15,7 +15,7 @@ def load_args() -> dict:
     both an IRL and IRR library for paired-end reads from Illumina sequencing. This script uses three other
     programs that must be accessible from the command line: cutadapt, bowtie2, and samtools.
     
-    Usage: preprocess_reads.py --data DIR --output_prefix STR --bowtie_index DIR --input FILE --irl_tpn STR --irr_tpn STR --adapter STR [options]
+    Usage: preprocess_reads.py --data DIR --output_prefix STR --bowtie_index DIR --input FILE --irl STR --irr STR --adapter STR [options]
     
      -d, --data=DIR                     directory that contains the .fasta or .fastq files of insertions to map. Files can be compressed with gzip
      -o, --output_prefix=DIR            a directory ending with a prefix that will have "-bam" appended to it
@@ -33,7 +33,7 @@ def load_args() -> dict:
     """
 
     # remove "--" from args
-    new_args = { new_args[key.split("-")[-1]]: value for key, value in docopt(doc).items() }
+    new_args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
 
     # files and directory args
     new_args["data"] = Path(new_args["data"])
@@ -122,11 +122,7 @@ def preprocess_read_helper(iter_args) -> None:
 def main() -> None:
     main_args = load_args()
     files_df = pd.read_csv(main_args["input"], sep="\t", header=None)
-    iter_args = tqdm([ (row[1], main_args) for row in files_df.itertuples() ])
-    # TODO: use concurrent.futures.ProcessPoolExecutor instead for better async MP?
-    # https://docs.python.org/3/library/concurrent.futures.html#module-concurrent.futures
-    # with concurrent.futures.ProcessPoolExecutor(max_workers=main_args["npara"]) as executor:
-    #    [ _ for x in executor.map(preprocess_read_helper, iter_args, chunksize=4) ]
+    iter_args = tqdm([ (row[1], main_args) for row in files_df.iterrows() ])
     with Pool(main_args["npara"]) as p:
         [ x for x in p.imap_unordered(preprocess_read_helper, iter_args) ]
         p.close()
