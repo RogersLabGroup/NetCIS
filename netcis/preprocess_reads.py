@@ -123,6 +123,10 @@ def main() -> None:
     main_args = load_args()
     files_df = pd.read_csv(main_args["input"], sep="\t", header=None)
     iter_args = tqdm([ (row[1], main_args) for row in files_df.itertuples() ])
+    # TODO: use concurrent.futures.ProcessPoolExecutor instead for better async MP?
+    # https://docs.python.org/3/library/concurrent.futures.html#module-concurrent.futures
+    # with concurrent.futures.ProcessPoolExecutor(max_workers=main_args["npara"]) as executor:
+    #    [ _ for x in executor.map(preprocess_read_helper, iter_args, chunksize=4) ]
     with Pool(main_args["npara"]) as p:
         [ x for x in p.imap_unordered(preprocess_read_helper, iter_args) ]
         p.close()
