@@ -169,7 +169,7 @@ def process_bam(file, mapq_thres, chr_dict) -> pd.DataFrame | None:
     else:
         df = pd.concat(insertions, axis=0).reset_index(drop=True)
         df["tpn_promoter_orient"] = df["strand"]
-        return 
+        return df
 
 def process_bam_helper(iter_args) -> None:
     row, args = iter_args
@@ -198,7 +198,6 @@ def process_bam_helper(iter_args) -> None:
         inserts_irr_df["strand"] = np.where(inserts_irr_df["strand"], "+", "-")
         inserts_irr_df["tpn_promoter_orient"] = np.where(inserts_irr_df["tpn_promoter_orient"], "+", "-")
 
-        
     # concat of a dataframe and if None just results in the original dataframe
     inserts_df = pd.concat([inserts_irl_df, inserts_irr_df], ignore_index=True)
 
