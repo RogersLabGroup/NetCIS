@@ -32,6 +32,15 @@ Data should be fastq files directly from sequencing. Preprocessing of the data h
 - process insertions
 - save individual insertions per fastq file
 
+## File Structure
+
+TODO:
+
+- input file for preprocess reads
+- chrom mapper file for preprocess insertions
+  - GRCm39 https://www.ncbi.nlm.nih.gov/assembly/GCF_000001635.27/
+  - https://genome.ucsc.edu/cgi-bin/hgTracks?chromInfoPage=&hgsid=1560703641_1YwiSDzyFEZ8nuDrTobTnwtYvReT
+
 ## Limitations
 
 It is assummed that the SB screen data has IRL/IRR libraries and paired reads.

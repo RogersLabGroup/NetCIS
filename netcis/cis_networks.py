@@ -3,6 +3,7 @@ from multiprocessing import Pool
 from typing import Generator
 import sys
 
+from tqdm import tqdm
 from docopt import docopt
 import numpy as np
 from pandas import read_csv, concat, DataFrame
@@ -16,89 +17,70 @@ def load_args() -> dict:
     
     Usage: cis_networks.py --output_prefix DIR [options]
     
-     --output_prefix=DIR            a prefix of the output directory that will have "-graphs" appended to it
+     -o, --output_prefix=DIR           a prefix of the output directory that will have "-graphs" appended to it
 
     Options:
-     -h --help                      show this help message and exit
-     --verbose=N                    print more verbose information using 0, 1 or 2 [default: 0]
-     --jobs=N                       number of processes to run [default: 1]
-     --threshold=N                  maximum distance to connect two insertions together in the CIS network. We suggest not going over the default value [default: 50000]
+     -h, --help                        show this help message and exit
+     -v, --verbose=N                   print more verbose information using 0, 1 or 2 [default: 0]
+     -t, --threshold=N                 maximum distance to connect two insertions together in the CIS network. We suggest not going over the default value [default: 50000]
+     -j, --jobs=N                      number of processes to run [default: 1]
     """
 
-    input_args = docopt(doc)
-
-    new_input_args = {}
-    for key, value in input_args.items():
-        new_key = key.split("-")[-1]
-        new_input_args[new_key] = value
+    # remove "--" from args
+    new_args = { new_args[key.split("-")[-1]]: value for key, value in docopt(doc).items() }
 
     int_opts = ["jobs", "verbose", "threshold"]
     for opts in int_opts:
-        new_input_args[opts] = int(new_input_args[opts])
+        new_args[opts] = int(new_args[opts])
 
-    new_input_args["insertion_dir"] = Path(new_input_args["output_prefix"] + "-insertions")
-    new_input_args["output"] = Path(new_input_args["output_prefix"] + "-graphs")
+    new_args["insertion_dir"] = Path(new_args["output_prefix"] + "-insertions")
+    new_args["output"] = Path(new_args["output_prefix"] + "-graphs")
 
-    return new_input_args
+    return new_args
 
-def create_graph(chrom_df: DataFrame, threshold, save_file, verbose=0) -> None:
-    G = nx.Graph()
+def add_nodes(insertion_df):
+    def add_node(insert):
+        node = f"{insert.pos}|{insert.tpn_promoter_orient}"
+        attr = {
+            "counts": insert.count,
+            "counts_irr": insert.count_irr,
+            "counts_irl": insert.count_irl,
+            "orient": insert.tpn_promoter_orient,
+            "chrom": insert.chr,
+            "position": insert.pos,
+        }
+        return (node, attr)
+    return [ add_node(x) for x in insertion_df.itertuples() ]
+
+
+def find_edges(ordered_nodes, threshold):
+    """
+    use of numpy vector based methods to speed up the process of identifying and adding edges 
+    to a graph when using distance between nodes (for which the nodes are numbers).
     
-    # prepare the insertions by grouping them together
-    # find the total count of insertions and the counts per sequencing library (IRR/IRL)
-    insert_cols = ['chr', 'pos', 'tpn promoter orient', 'seq library']
-    tmp = chrom_df.groupby(by=insert_cols, as_index=False, dropna=False)['read name'].count()
-    tmp['count'] = tmp.pop('read name')
-    count_irr = np.where(tmp['seq library'] == 'IRR', tmp['count'], 0)
-    count_irl = np.where(tmp['seq library'] == 'IRL', tmp['count'], 0)
-    tmp.insert(5, "count_irr", count_irr)
-    tmp.insert(6, "count_irl", count_irl)
+    A notebook with the step-by-step output of this function is available under notebooks/create_graph_edges.ipynb
     
-    # group insertions without the sequencing library. 
-    # As long as the transposon orientation, chromosome, and position are the same, 
-    # then it does not matter which library the insertion came from
-    node_cols = ['chr', 'pos', 'tpn promoter orient']
-    insertion_nodes = tmp.groupby(by=node_cols, as_index=False, dropna=False).sum(numeric_only=True)
-    insertion_nodes['read names'] = chrom_df.groupby(by=node_cols, dropna=False, group_keys=False)['read name'].apply(list).reset_index(drop=True)
-    
-    # TODO: for some reason there are few insertions that occur both in IRR and IRL
-    # both_libs = insertion_nodes[ (insertion_nodes['count_irl'] != 0) & (insertion_nodes['count_irr'] != 0) ]
-    
-    # add each insertion. Since they are unique, I can add the edges after all the nodes are in
-    for i in range(len(insertion_nodes)):
-        if (i % 1000 == 0) and (i != 0) and verbose:
-            print(f"\t{i+1/len(insertion_nodes)} insertions")
-        insert = insertion_nodes.iloc[i]
-        new_node = f"{insert['pos']}|{insert['tpn promoter orient']}"
-        # add node(i) as an insertion location into the network
-        G.add_node(
-            new_node,
-            counts=insert["count"],
-            counts_irr=insert["count_irr"],
-            counts_irl=insert["count_irl"],
-            orient=insert["tpn promoter orient"],
-            chrom=insert["chr"],
-            position=insert["pos"],
-        )
-        # for other_node in G.nodes:
-        #     if other_node == new_node:
-        #         continue
-        #     # find distance between nodes using their position
-        #     node_dist = abs(G.nodes[other_node]["position"] - G.nodes[new_node]["position"])
-        #     # double check don't add edge to self
-        #     if node_dist == 0:
-        #         continue
-        #     # if distance between node(i) and node(j) is less than threshold
-        #     if node_dist <= threshold:
-        #         # add edge(ij) with a weight of the distance (or inverse?) to the network
-        #         
-        #         G.add_edge(new_node, other_node, weight=1 / node_dist)
-    
-    # the following code does what is commented out above but I am keeping all of this in for a future user to reference
-    # TODO: make ipynb for this so future users can step through the process
-    # nodes are inherently ordered as they are added in the graph. 
-    # however, the ordering doens't have to numerically make sense
-    ordered_nodes = G.nodes()
+    This function does the same this, and is a direct replacement, for the following code 
+
+    # find and add edges
+    for other_node in G.nodes:
+        if other_node == new_node:
+            continue
+        # find distance between nodes using their position
+        node_dist = abs(G.nodes[other_node]["position"] - G.nodes[new_node]["position"])
+        # double check don't add edge to self
+        if node_dist == 0:
+            continue
+        # if distance between node(i) and node(j) is less than threshold
+        if node_dist <= threshold:
+            # add edge(ij) with a weight of the distance (or inverse?) to the network
+            
+            G.add_edge(new_node, other_node, weight=1 / node_dist)
+    """ 
+    # nodes are inherently ordered as they are added in the graph,
+    # however, the ordering doens't have to numerically make sense for this function
+
+
     # remove the transposon orientation from the end of the node name
     tmp_order = [ int(x.split("|")[0]) for x in ordered_nodes ]
     # check if this changes the number of unique nodes.
@@ -123,7 +105,7 @@ def create_graph(chrom_df: DataFrame, threshold, save_file, verbose=0) -> None:
     keep_nodes = cis_nodes[edges_ind]  # 1d array
     
     # set up the nodes to be a numpy array for easy indexing
-    ordered_nodes = np.array(G.nodes())  # 1d array
+    ordered_nodes = np.array(ordered_nodes)  # 1d array
     
     # get the actual node names for the lower left triangle via as the column
     nodes1 = ordered_nodes[edges_ind[1][keep_nodes]]  # 1d array
@@ -134,7 +116,35 @@ def create_graph(chrom_df: DataFrame, threshold, save_file, verbose=0) -> None:
     # combine the nodes and weights into an iterable that can be passed wholly into the graph
     # an edge is defined as the first node, the second node, and then a dict of attributes, such as weight
     edges_to_add = [ (x, y, {"weight": z}) for x, y, z in zip(nodes1, nodes2, nodes_dist) ]
-    G.add_edges_from(edges_to_add)
+    return edges_to_add
+
+def create_graph(chrom_df: DataFrame, threshold, save_file, verbose=0) -> None:
+    G = nx.Graph()
+    
+    # prepare the insertions by grouping them together
+    # find the total count of insertions and the counts per sequencing library (IRR/IRL)
+    insert_cols = ['chr', 'pos', 'tpn_promoter_orient', 'library']
+    tmp = chrom_df.groupby(by=insert_cols, as_index=False, dropna=False)['read_name'].count()
+    tmp['count'] = tmp.pop('read name')
+    count_irr = np.where(tmp['library'] == 'IRR', tmp['count'], 0)
+    count_irl = np.where(tmp['library'] == 'IRL', tmp['count'], 0)
+    tmp.insert(5, "count_irr", count_irr)
+    tmp.insert(6, "count_irl", count_irl)
+    
+    # group insertions without the sequencing library. 
+    # As long as the transposon orientation, chromosome, and position are the same, 
+    # then it does not matter which library the insertion came from
+    node_cols = ['chr', 'pos', 'tpn_promoter_orient']
+    insertion_nodes = tmp.groupby(by=node_cols, as_index=False, dropna=False).sum(numeric_only=True)
+    insertion_nodes['read_names'] = chrom_df.groupby(by=node_cols, dropna=False, group_keys=False)['read_name'].apply(list).reset_index(drop=True)
+    
+    # TODO: for some reason there are few insertions that occur both in IRR and IRL. 
+    # Why is that and does this change with the new preprocessing scripts?
+    # both_libs = insertion_nodes[ (insertion_nodes['count_irl'] != 0) & (insertion_nodes['count_irr'] != 0) ]
+    
+    # add nodes and edges to graph
+    G.add_nodes_from(add_nodes(insertion_nodes))
+    G.add_edges_from(find_edges(G.nodes(), threshold))
 
     # save the graph
     nx.write_graphml(G, save_file)
@@ -163,12 +173,19 @@ def main(args) -> None:
     # get all files in data dir, load each file as pandas.DataFrame, and add meta data based on the file name
     insert_list = []
     for file in args["insertion_dir"].iterdir():
-        cell_type, cell_id, tumor_type = file.stem.split("-")
-        tmp_df = read_csv(file)
-        tmp_df["cell type"] = cell_type
-        tmp_df["cell id"] = cell_id
-        tmp_df["tumor type"] = tumor_type
+        tmp_df = read_csv(file)  # TODO: load .tsv
+        
+        tumor_model, sample_id, tumor_tmp = file.name.split("-")
+        tissue_type, lib_tmp = tumor_tmp.split("_")
+        library = lib_tmp.split(".")[0]
+    
+        tmp_df["tumor_model"] = tumor_model
+        tmp_df["sample_id"] = sample_id
+        tmp_df["tissue"] = tissue_type  # RT/LT/S
+        tmp_df["library"] = library  # IRR/IRL
+    
         insert_list.append(tmp_df)
+        
     inserts_df = concat(insert_list, ignore_index=True)
 
     # TODO: how are we choosing case and controls?
@@ -178,8 +195,8 @@ def main(args) -> None:
     
     
     # separate data into case/controls
-    insert_case = inserts_df[inserts_df["tumor type"] == "S"]
-    insert_control = inserts_df[inserts_df["tumor type"] != "S"]
+    insert_case = inserts_df[inserts_df["tissue"] == "S"]
+    insert_control = inserts_df[inserts_df["tissue"] != "S"]
 
     # get all chromosomes to separate further the case/controls dataframes
     chrom_list = np.unique(inserts_df["chr"].to_numpy())
@@ -191,8 +208,10 @@ def main(args) -> None:
         
     # construct CIS network per chromosome for case and control insertions
     iter_gen = create_graph_generator(chrom_list, insert_case, insert_control, args['threshold'], out_dir_case, out_dir_control)
+    iter_gen = tqdm(iter_gen)
     with Pool(jobs) as p:
         [ x for x in p.imap_unordered(create_graph_helper, iter_gen) ]
+        p.close()
         
 if __name__ == "__main__": 
     main(load_args())
