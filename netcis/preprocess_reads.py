@@ -26,8 +26,9 @@ def load_args() -> dict:
      -a, --adapter=STR                  a string that is the 5'-3' adapter sequence
 
     Options:
-     -h --help                      show this help message and exit
-     -v, --verbose=N                    (NOT USED) print more verbose information using 0, 1 or 2 [default: 0]
+     -h --help                          show this help message and exit
+     -v, --verbose=N                    (TODO: NOT USED) print more verbose information using 0, 1 or 2 [default: 0]
+     -c, --chrom_bed=FILE               (TODO: add option in code for this) a .bed file containing the regions to keep. See README.md for more information
      -t, --ntask=INT                    number of threads to use that will speed up cutadapt, bowtie2, and samtools [default: 1]
      -p, --npara=INT                    number of parallel processes to preprocess multiple files at the same time [default: 1]
     """
@@ -41,10 +42,10 @@ def load_args() -> dict:
     new_args["bam_output"] = Path(new_args["output_prefix"] + "-bam")
     new_args["bam_output"].mkdir(parents=True, exist_ok=True)
     
-    new_args["bowtie_output"] = Path(new_args["output_prefix"] + "-bowtie")
-    new_args["bowtie_output"].mkdir(parents=True, exist_ok=True)
-    
     new_args["bowtie_index"] = Path(new_args["bowtie_index"])
+    
+    if new_args["chrom_bed"] is not None:
+        new_args["chrom_bed"] = Path(new_args["chrom_bed"])
     
     new_args["input"] = Path(new_args["input"])
     
@@ -60,19 +61,23 @@ def load_args() -> dict:
         
     return new_args
 
-def preprocess_reads(tpn, adaptor, read_f, read_r, mysample_file, ntask, genome_index_dir, bowtie_output) -> None:
-    """Process forward and reverse reads ---> trim adaptors ---> map reads"""
+def preprocess_reads(tpn, adaptor, read_f, read_r, mysample_file, ntask, genome_index_dir, chrom_bed) -> None:
+    """Process forward and reverse reads: trim transposon and adaptor, map reads, save to bam file"""
     # for read 1, we need to trim off tpn at 5'
     # for read 2, we need to trim off tpn_rc at 3'
     tpn_rc = tpn.reverse_complement()
     adaptor_rc = adaptor.reverse_complement()
 
+    if chrom_bed is None:
+        keep_regions = ""
+    else:
+        keep_regions = "-L " + str(chrom_bed)
+    
+
     trim_f = read_f.with_stem("trim-" + read_f.name)
     trim_r = read_r.with_stem("trim-" + read_r.name)
-
-    sam_file = mysample_file.with_suffix(".sam")
+    
     bam_file = mysample_file.with_suffix(".bam")
-    bowtie_file = bowtie_output / mysample_file.with_suffix(".txt").name
     
     # https://cutadapt.readthedocs.io/en/stable/guide.html#id4
     # --front or -g, -G is for read 2 (reverse)
@@ -82,15 +87,16 @@ def preprocess_reads(tpn, adaptor, read_f, read_r, mysample_file, ntask, genome_
     os.system(
         f"cutadapt -j {ntask} --quiet --discard-untrimmed -g {tpn} -G {adaptor_rc} -a {adaptor} -A {tpn_rc} -o {trim_f} -p {trim_r} {read_f} {read_r}"
     )
-    os.system(
-        f"bowtie2 -p {ntask} --local -x {genome_index_dir} -q -1 {trim_f} -2 {trim_r} -S {sam_file} > {bowtie_file} 2>&1"
-    )
+    # map reads and keep reads that are properly paired, have a mapQ > 13 or mapP < 0.05, and are in the .bed regions file
+    bowtie = f"bowtie2 -p {ntask} --quiet --local -x {genome_index_dir} -1 {trim_f} -2 {trim_r}"
+    sam_filter = f"samtools view -@ {ntask} {keep_regions} -f 2 -q 13 -u"
+    sam_sort = f"samtools sort -@ {ntask} -l 9 -o {bam_file} > /dev/null 2>&1"
+    sam_index = f"samtools index -@ {ntask} {bam_file}"
+    os.system(f"{bowtie} | {sam_filter} | {sam_sort}; {sam_index}")
+    
     os.system(f"rm {trim_f}")
     os.system(f"rm {trim_r}")
-
-    os.system(f"samtools sort -@ {ntask} -l 9 -o {bam_file} {sam_file} > /dev/null 2>&1")
-    os.system(f"samtools index -@ {ntask} {bam_file}")
-    os.system(f"rm {sam_file}")
+    
     sys.stdout.flush()
     sys.stderr.flush()
 
@@ -100,24 +106,23 @@ def preprocess_read_helper(iter_args) -> None:
     
     data_dir = args["data"]
     bam_output_dir = args["bam_output"]
-    bowtie_output_dir = args["bowtie_output"]
     genome_index_dir = args["bowtie_index"]
+    chrom_bed = args["chrom_bed"]
     ntask = args["ntask"]
     irl_tpn = args["irl"]
     irr_tpn = args["irr"]
     adapter = args["adapter"]
     
     mysample = row[0]
-    
     irl_F = data_dir / row[1]
     irl_R = data_dir / row[2]
     irl_file = bam_output_dir / (mysample + "_IRL")
-    preprocess_reads(irl_tpn, adapter, irl_F, irl_R, irl_file, ntask, genome_index_dir, bowtie_output_dir)
+    preprocess_reads(irl_tpn, adapter, irl_F, irl_R, irl_file, ntask, genome_index_dir, chrom_bed)
     
     irr_F = data_dir / row[3]
     irr_R = data_dir / row[4]
     irr_file = bam_output_dir / (mysample + "_IRR")
-    preprocess_reads(irr_tpn, adapter, irr_F, irr_R, irr_file, ntask, genome_index_dir, bowtie_output_dir)
+    preprocess_reads(irr_tpn, adapter, irr_F, irr_R, irr_file, ntask, genome_index_dir, chrom_bed)
 
 def main() -> None:
     main_args = load_args()

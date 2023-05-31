@@ -9,6 +9,8 @@ import numpy as np
 from pandas import read_csv, concat, DataFrame
 import networkx as nx
 
+from analysis import graph_properties
+
     
 def load_args() -> dict:
     doc = """  
@@ -21,7 +23,7 @@ def load_args() -> dict:
 
     Options:
      -h, --help                        show this help message and exit
-     -v, --verbose=N                   print more verbose information using 0, 1 or 2 [default: 0]
+     -v, --verbose=N                   (TODO: how to allow --verbose meaning 1 as well as supplying value?) print more verbose information using 0, 1 or 2 [default: 0]
      -t, --threshold=N                 maximum distance to connect two insertions together in the CIS network. We suggest not going over the default value [default: 50000]
      -j, --jobs=N                      number of processes to run [default: 1]
     """
@@ -112,35 +114,40 @@ def find_edges(ordered_nodes, threshold):
     edges_to_add = [ (x, y, {"weight": z}) for x, y, z in zip(nodes1, nodes2, nodes_dist) ]
     return edges_to_add
 
-def create_graph(chrom_df: DataFrame, threshold, save_file, verbose=0) -> None:
+def create_graph(chrom_df: DataFrame, save_file, threshold=50000, verbose=0) -> None:
     G = nx.Graph()
     chrom_df.insert(4, "counts_irr", np.where(chrom_df['library'] == 'IRR', 1, 0))
     chrom_df.insert(5, "counts_irl", np.where(chrom_df['library'] == 'IRL', 1, 0))
     chrom_df.insert(6, "counts_trp_orient_pos", np.where(chrom_df['tpn_promoter_orient'] == '+', 1, 0))
     chrom_df.insert(7, "counts_trp_orient_neg", np.where(chrom_df['tpn_promoter_orient'] == '-', 1, 0))
-    insertion_nodes = chrom_df.groupby(by=['chr', 'pos'], as_index=False, dropna=False)[["counts_irr", "counts_irl", "counts_trp_orient_pos", "counts_trp_orient_neg"]].sum()
-    insertion_nodes.insert(2, "counts", chrom_df.groupby(by=['chr', 'pos'], as_index=False, dropna=False)['read_name'].count().pop('read_name'))
+    cols = ["counts_irr", "counts_irl", "counts_trp_orient_pos", "counts_trp_orient_neg"]
+    
+    tmp_group = chrom_df.groupby(by=['chr', 'pos'], sort=False, as_index=False, dropna=False)
+    insertion_nodes_df = tmp_group[cols].sum()
+    insertion_nodes_df.insert(2, "counts", tmp_group['read_name'].count().pop('read_name'))
 
     # add nodes and edges to graph
-    G.add_nodes_from(add_nodes(insertion_nodes))
+    G.add_nodes_from(add_nodes(insertion_nodes_df))
     G.add_edges_from(find_edges(G.nodes(), threshold))
+    
+    if verbose > 1:
+        graph_properties(G)
 
     # save the graph
     nx.write_graphml(G, save_file)
 
 def create_graph_helper(iter_args) -> None:
-    insert_case_chrom, insert_control_chrom, threshold, case_file, control_file = iter_args
-    create_graph(insert_case_chrom, threshold, case_file)
-    create_graph(insert_control_chrom, threshold, control_file)
+    insert_case_chrom, case_file, insert_control_chrom, control_file, threshold, verbose = iter_args
+    create_graph(insert_case_chrom, case_file, threshold, verbose)
+    create_graph(insert_control_chrom, control_file, threshold, verbose)
     
-def create_graph_generator(chrom_list, insert_case, insert_control, threshold, case_dir, control_dir) -> Generator[tuple, None, None]:
+def create_graph_generator(chrom_list, insert_case, insert_control, case_dir, control_dir, args) -> Generator[tuple, None, None]:
     for chrom in chrom_list:
-        # print(chrom)
         insert_case_chrom = insert_case[insert_case['chr'] == chrom]    
         insert_control_chrom = insert_control[insert_control['chr'] == chrom]
         case_file = case_dir / f"{chrom}.graphml"
         control_file = control_dir / f"{chrom}.graphml"
-        yield ( insert_case_chrom, insert_control_chrom, threshold, case_file, control_file )
+        yield ( insert_case_chrom, case_file, insert_control_chrom, control_file, args["threshold"], args["verbose"] )
 
 def main(args) -> None:
     # prepare output
@@ -176,13 +183,14 @@ def main(args) -> None:
     
     # don't allow more jobs than there are chromosomes
     jobs = args["jobs"]
-    if len(chrom_list) < jobs:
-        print(f"Reducing number of jobs from {jobs} to {len(chrom_list)}, since there are only {len(chrom_list)} chromosomes present.")
+    num_chr = len(chrom_list)
+    if num_chr < jobs:
+        print(f"Reducing number of jobs from {jobs} to {num_chr}, since there are only {num_chr} chromosomes present.")
         jobs = len(chrom_list)
         
     # construct CIS network per chromosome for case and control insertions
-    iter_gen = create_graph_generator(chrom_list, insert_case, insert_control, args['threshold'], out_dir_case, out_dir_control)
-    iter_gen = tqdm(iter_gen)
+    iter_gen = create_graph_generator(chrom_list, insert_case, insert_control, out_dir_case, out_dir_control, args)
+    iter_gen = tqdm(iter_gen, total=num_chr)
     with Pool(jobs) as p:
         for _ in p.imap_unordered(create_graph_helper, iter_gen):
             pass

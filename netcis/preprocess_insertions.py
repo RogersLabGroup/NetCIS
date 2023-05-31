@@ -15,15 +15,15 @@ def load_args() -> dict:
     insertions per row with additional statistics of that insertion. Additionaly, a .tsv file is required
     to idnetify contigs (chromosomes) to keep as well as mapping contigs to a different format if desired.
     
-    Usage: preprocess_insertions.py --output_prefix STR --input FILE --chroms FILE [options]
+    Usage: preprocess_insertions.py --output_prefix STR --input FILE [options]
     
      -o, --output_prefix=DIR            a directory ending with a prefix that will have "-insertions" appended to it. A directory with "-bam" appended to it should have been created from preprocess_reads.py
      -i, --input=FILE                   a file that contains which files to preprocess, same one used in preprocess_reads.py. See README.md for more information
-     -c, --chroms=FILE                  a file that contains what contigs should be kept (1 columns) or what to rename the contigs to keep (2 columns). See README.md for more information.
     
     Options:
-     -h, --help                          show this help message and exit
-     -v, --verbose=N                    (NOT USED) print more verbose information using 0, 1 or 2 [default: 0]
+     -h, --help                         show this help message and exit
+     -v, --verbose=N                    print more verbose information using 0, 1 or 2 [default: 0]
+     -c, --chroms=FILE                  (TODO: add option in code for this) a file that contains what contigs should be kept (1 columns) or what to rename the contigs to keep (2 columns). See README.md for more information.
      -t, --threshold=N                  a float from 0 to 1 that is the maximum probability allowed that a read was mapped incorrectly [default: 0.05]
      -j, --njobs=N                      an integer for the number of parallel processes to work on multiple files at the same time [default: 1]
     """
@@ -128,16 +128,15 @@ def read_is_quality(read, mapq_thres, chr_dict) -> bool:
     
     return True
 
-def process_bam(file, mapq_thres, chr_dict) -> pd.DataFrame | None:
+def process_bam(file, mapq_thres, chr_dict, verbose) -> pd.DataFrame | None:
     """
     Filter out low quality insertions
     This only can run on paired read sequencing data
     """
 
-    # TODO: maybe set up pandas dataframe with only the info I need, then use itertuples to quickly run through everything?
     bam = pysam.AlignmentFile(file, "rb")
     insertions = []
-    for read1 in bam.fetch():  # multiple_iterators=True
+    for i, read1 in enumerate(bam.fetch()):  # multiple_iterators=True
         # only look at read 1
         if not read1.is_read1:
             continue
@@ -162,6 +161,8 @@ def process_bam(file, mapq_thres, chr_dict) -> pd.DataFrame | None:
                 insert_properties = get_insertion_properties(read2, chr_dict)
                 insertions.append(insert_properties)
     bam.close()
+    if verbose:
+        print(f"number of reads: {i}")
     
     # check if there were any inseritons at all to avoid errors from pandas.concat()
     if len(insertions) == 0:
@@ -183,7 +184,7 @@ def process_bam_helper(iter_args) -> None:
     irr_bam = bam_dir / (mysample + "_IRR.bam")
 
     # find quality insertion in IRR and IRL libraries and convert them to single insertion site format
-    inserts_irl_df = process_bam(file=irl_bam, mapq_thres=thres, chr_dict=chr_dict)
+    inserts_irl_df = process_bam(irl_bam, thres, chr_dict, args["verbose"])
     if (inserts_irl_df is not None):  # if no insertions present, process_bam returns None
         inserts_irl_df["library"] = "IRL"
         # set transposon promoter orientation depending on sequencing library
@@ -192,20 +193,30 @@ def process_bam_helper(iter_args) -> None:
         inserts_irl_df["strand"] = np.where(inserts_irl_df["strand"], "+", "-")
         inserts_irl_df["tpn_promoter_orient"] = np.where(inserts_irl_df["tpn_promoter_orient"], "+", "-")
     
-    inserts_irr_df = process_bam(file=irr_bam, mapq_thres=thres, chr_dict=chr_dict)
+    inserts_irr_df = process_bam(irr_bam, thres, chr_dict, args["verbose"])
     if (inserts_irr_df is not None):  # if no insertions present, process_bam returns None
         inserts_irr_df["library"] = "IRR"
         inserts_irr_df["strand"] = np.where(inserts_irr_df["strand"], "+", "-")
         inserts_irr_df["tpn_promoter_orient"] = np.where(inserts_irr_df["tpn_promoter_orient"], "+", "-")
 
-    # concat of a dataframe and if None just results in the original dataframe
-    inserts_df = pd.concat([inserts_irl_df, inserts_irr_df], ignore_index=True)
+    # concat of a dataframe and if check if any df is None
+    if inserts_irl_df is None and inserts_irr_df is None:
+        return
+    elif inserts_irl_df is None and inserts_irr_df is not None:
+        inserts_df = inserts_irr_df
+    elif inserts_irl_df is not None and inserts_irr_df is None:
+        inserts_df = inserts_irl_df
+    else:
+        inserts_df = pd.concat([inserts_irl_df, inserts_irr_df], ignore_index=True)
 
     # verify that insertions did not count both read1 and read2
-    # do this by checking that the length of 'read names'is the same number as the length of unique read names
+    # do this by checking that the length of 'read names' is the same number as the length of unique read names
     read_names = inserts_df["read_name"].to_numpy()
     assert len(np.unique(read_names)) == len(read_names)
 
+    # sort by chr, then pos
+    inserts_df = inserts_df.sort_values(["chr", "pos"], ignore_index=True)
+    
     # save insertions
     inserts_df.to_csv(insertions_dir / (mysample + ".tsv"), sep="\t", index=False)
 
@@ -213,6 +224,8 @@ def main() -> None:
     main_args = load_args()
     files_df = pd.read_csv(main_args["input"], sep="\t", header=None)
     iter_args = tqdm([ (row[1], main_args) for row in files_df.iterrows() ])
+    # with concurrent.futures.ProcessPoolExecutor(max_workers=main_args["njobs"]) as executor:
+    #   executor.map(process_bam_helper, iter_args)
     with Pool(main_args["njobs"]) as p:
         [ x for x in p.imap_unordered(process_bam_helper, iter_args) ]
         p.close()

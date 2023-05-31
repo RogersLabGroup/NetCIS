@@ -22,21 +22,19 @@ npara=12
 output_prefix="2020_SB/all_files"
 bowtieIndex="/research/labs/immunology/rogerslm/tools/bowtie2_indexes/GRCm39/GRCm39"
 input="2020_SB/input.tsv"
+chrom_bed="2020_SB/keep-chroms.bed"
 irl_tpn="AAATTTGTGGAGTAGTTGAAAAACGA"
 irr_tpn="GGATTAAATGTCAGGAATTGTGAAAA"
 adaptor="TACCCATACGACGTCCCAGA"
-# TODO: test
-python netcis/preprocess_reads.py -d $fastq -o $output_prefix -b $bowtieIndex -i $input -l $irl_tpn -r $irr_tpn -a $adaptor -t $ntasks -p $npara
+python netcis/preprocess_reads.py -d $fastq -o $output_prefix -b $bowtieIndex -i $input -l $irl_tpn -r $irr_tpn -a $adaptor -t $ntasks -p $npara -c $chrom_bed
 
 njobs=$((ntasks * npara))
 mapP_thresh=0.05
 chrom_mapper="2020_SB/chrom_mapper.tsv"
-# TODO: test
 python netcis/preprocess_insertions.py -o $output_prefix -i $input -c $chrom_mapper -t $mapP_thresh -j $njobs
 
 edge_thresh=50000
-# TODO: test
-python netcis/cis_networks.py -o $output_prefix -t $edge_thresh -j $njobs
+python netcis/cis_networks.py -o $output_prefix -t $edge_thresh -j 4
 
 # TODO:
 # python netcis/analysis.py
