@@ -81,7 +81,7 @@ def get_insertion_properties(insertion, chrdict) -> pd.DataFrame:
     ref_first_last = tmp[:10] + "-" + tmp[-10:]
         
     res = {
-        "chr": [chrdict[insertion.reference_name]],
+        "chr": [insertion.reference_name],
         "pos": [insertion.reference_start],  # 0-based left most coordinate
         "strand": [insertion.is_forward],
         "ref_length": [insertion.reference_length],
@@ -118,9 +118,9 @@ def read_is_quality(read, mapq_thres, chr_dict) -> bool:
     if not read.is_mapped:
         return False
 
-    # has a contig (chromosome) is the predefined dict
-    if read.reference_name not in chr_dict.keys():
-        return False
+    # # has a contig (chromosome) is the predefined dict
+    # if read.reference_name not in chr_dict.keys():
+    #     return False
     
     # read must have a high quality mapping score
     if convert_mapq(read.mapping_quality) > mapq_thres:
@@ -128,7 +128,7 @@ def read_is_quality(read, mapq_thres, chr_dict) -> bool:
     
     return True
 
-def process_bam(file, mapq_thres, chr_dict, verbose) -> pd.DataFrame | None:
+def process_bam(file, mapq_thres, chr_dict, verbose):
     """
     Filter out low quality insertions
     This only can run on paired read sequencing data
@@ -136,6 +136,7 @@ def process_bam(file, mapq_thres, chr_dict, verbose) -> pd.DataFrame | None:
 
     bam = pysam.AlignmentFile(file, "rb")
     insertions = []
+    i = 0
     for i, read1 in enumerate(bam.fetch()):  # multiple_iterators=True
         # only look at read 1
         if not read1.is_read1:

@@ -44,3 +44,13 @@ TODO:
 ## Limitations
 
 It is assummed that the SB screen data has IRL/IRR libraries and paired reads.
+
+## Other Preprocessing Things
+
+/project/cs-myers/MathewF/software/bowtie2-2.4.5/indexes
+
+- download reference genome
+- keep only major chromosomes
+- concatenate individual chromosomes into one file
+- create mapper index from ref genome (bowtie2)
+- find all TA dimer sites in ref genome chroms into .bed format (seqkit)
