@@ -4,11 +4,9 @@
 
 - cutadapt
 - bowtie2
-- bam2bed?
 - python 3.10
 - networkx
-- cytoscape
-- GO enrichment
+- GO enrichment?
 - GSEA?
 
 ## Preprocess data

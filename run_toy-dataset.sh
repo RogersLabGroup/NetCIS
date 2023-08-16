@@ -27,3 +27,9 @@ python netcis/preprocess_insertions.py -o $output_prefix -i $input -t $mapP_thre
 
 edge_thresh=50000
 python netcis/cis_networks.py -o $output_prefix -t $edge_thresh -j $njobs
+
+ta_dir="/project/cs-myers/MathewF/software/bowtie2-2.4.5/indexes/GRCm39_TAs/"
+gene_annot="/project/cs-myers/MathewF/projects/Laura-SB-Analysis/NetCIS/toy-data/MRK_List2.rpt"
+ta_error=5
+verbose=1
+python netcis/analysis.py  -o $output_prefix -b $ta_dir -g $gene_annot -t $ta_error -v $verbose

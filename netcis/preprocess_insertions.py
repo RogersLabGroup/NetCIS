@@ -118,13 +118,15 @@ def read_is_quality(read, mapq_thres, chr_dict) -> bool:
     if not read.is_mapped:
         return False
 
-    # # has a contig (chromosome) is the predefined dict
+    # TODO: 8/16/23 This isn't needed when we use a bowtie2 mapping that only has the chromosomes of interest and not weird contigs
+    # has a contig (chromosome) is the predefined dict
     # if read.reference_name not in chr_dict.keys():
     #     return False
     
+    # TODO: 8/16/23 removed mapq threshold temporarily
     # read must have a high quality mapping score
-    if convert_mapq(read.mapping_quality) > mapq_thres:
-        return False
+    # if convert_mapq(read.mapping_quality) > mapq_thres:
+    #     return False
     
     return True
 
@@ -220,6 +222,12 @@ def process_bam_helper(iter_args) -> None:
     
     # save insertions
     inserts_df.to_csv(insertions_dir / (mysample + ".tsv"), sep="\t", index=False)
+    
+    
+    # TODO: normailze per sample, per LT, RT, and S
+    # How to normalize? normalize read count?
+    
+    
 
 def main() -> None:
     main_args = load_args()

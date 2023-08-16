@@ -84,7 +84,8 @@ def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_i
     mapper = f"bowtie2 -p {ntask} --quiet --very-sensitive-local --local -x {genome_index_dir} -1 {trim1_f} -2 {trim1_r} -S {sam_file}"
     
     # keep reads that are properly paired, have a mapQ > 13 or mapP < 0.05, and are in the chrom_bed file if present
-    sam_filter = f"samtools view -@ {ntask} {keep_regions} -f 2 -q 13 -u {sam_file}"
+    # TODO: 8/16/23 removed mapq threshold temporarily
+    sam_filter = f"samtools view -@ {ntask} {keep_regions} -f 2 -u {sam_file}"  # -q 13
     sam_sort = f"samtools sort -@ {ntask} -l 9 -o {bam_file} > /dev/null 2>&1"
     sam_index = f"samtools index -@ {ntask} {bam_file}"
     os.system(f"{cutadapt}; {mapper}; {sam_filter} | {sam_sort}; {sam_index}")

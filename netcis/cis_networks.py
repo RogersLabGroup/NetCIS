@@ -174,9 +174,10 @@ def main(args) -> None:
     # or more formally, the disjointed insertions
     
     
+    # TODO: average the left and right insertions, if they are at the same insertion site
     # separate data into case/controls
-    insert_case = inserts_df[inserts_df["tissue"] == "S"]
-    insert_control = inserts_df[inserts_df["tissue"] != "S"]
+    insert_case = inserts_df[inserts_df["tissue"] != "S"]
+    insert_control = inserts_df[inserts_df["tissue"] == "S"]
 
     # get all chromosomes to separate further the case/controls dataframes
     chrom_list = np.unique(inserts_df["chr"].to_numpy())
