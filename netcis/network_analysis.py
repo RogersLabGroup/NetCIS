@@ -10,6 +10,13 @@ from scipy.stats import chisquare, binomtest, ranksums, mannwhitneyu, skewtest, 
 
 
 def load_args() -> dict:
+    """
+    Load command-line arguments using docopt.
+
+    Returns:
+        dict: Parsed command-line arguments
+    """
+    
     doc = """  
     Generate common insertion sites (CIS) using a network (graph) based approach. 
     The only parameter that will change how a CIS is generated can be control with --threshold
@@ -43,6 +50,16 @@ def load_args() -> dict:
     return new_args
 
 def graph_properties(G, verbose=0):
+    """
+    Calculate various properties of a graph.
+
+    Args:
+        G (networkx.Graph): The input graph
+        verbose (int, optional): Verbosity level. Default is 0.
+
+    Returns:
+        dict: Dictionary containing graph properties
+    """
     nodes = G.number_of_nodes()
     edges = G.number_of_edges()
     num_inserts = sum([ G.nodes[node]['counts'] for node in G.nodes ])
@@ -56,6 +73,16 @@ def graph_properties(G, verbose=0):
     return {"nodes": nodes, "edges": edges, "num_inserts": num_inserts, "num_subgraphs": num_subgraphs}
     
 def subgraph_properties(G, verbose=0):
+    """
+    Calculate properties of a subgraph.
+
+    Args:
+        G (networkx.Graph): The input subgraph
+        verbose (int, optional): Verbosity level. Default is 0.
+
+    Returns:
+        dict: Dictionary containing subgraph properties
+    """
     nodes = G.number_of_nodes()
     edges = G.number_of_edges()
     num_inserts = sum([ G.nodes[node]['counts'] for node in G.nodes ])
@@ -75,6 +102,18 @@ def subgraph_properties(G, verbose=0):
     return {"nodes": nodes, "edges": edges, "num_inserts": num_inserts, "min_pos": min_pos, "max_pos": max_pos, "range": range_pos}
     
 def subgraph_TA_sites(G, bed, ta_error, verbose=0):
+    """
+    Calculate properties related to TA sites in a subgraph.
+
+    Args:
+        G (networkx.Graph): The input subgraph
+        bed (pandas.DataFrame): Bed file data containing TA site information
+        ta_error (int): The error margin for TA site matching
+        verbose (int, optional): Verbosity level. Default is 0.
+
+    Returns:
+        dict: Dictionary containing TA site properties
+    """
     num_insert_sites = G.number_of_nodes()
     
     tmp_pos = sorted([ G.nodes[node]["position"] for node in G.nodes ])
@@ -95,6 +134,16 @@ def subgraph_TA_sites(G, bed, ta_error, verbose=0):
     return {"num_insert_sites": num_insert_sites, "num_ta_sites": num_ta_sites, "num_ta_insert_sites": num_ta_insert_sites}
     
 def get_subgraphs(graph_dir, graph_type):
+    """
+    Get subgraphs from the specified directory and type.
+
+    Args:
+        graph_dir (Path): Path to the directory containing graph data
+        graph_type (str): Type of graph (e.g., 'case', 'control')
+
+    Returns:
+        dict: Dictionary mapping chromosome names to a list of subgraphs
+    """
     subgraph_dict = {}
     for graph in (graph_dir / graph_type).iterdir():
         chrom = graph.name.split(".")[0]
@@ -104,17 +153,39 @@ def get_subgraphs(graph_dir, graph_type):
     return subgraph_dict
 
 def get_subgraph_stats(subgraph_chroms, graph_type, bed_files, ta_error):
+    """
+    Get statistics for subgraphs based on insertion sites and TA site data.
+
+    Args:
+        subgraph_chroms (dict): Dictionary of subgraphs for each chromosome
+        graph_type (str): Type of graph (e.g., 'case', 'control')
+        bed_files (dict): Dictionary of bed files containing TA site information
+        ta_error (int): The error margin for TA site matching
+
+    Returns:
+        pandas.DataFrame: DataFrame containing subgraph statistics
+    """
     subgraph_df_list = []
     for chrom, subgraphs in subgraph_chroms.items():
         for i, subgraph in enumerate(subgraphs):
             sg_meta = {"type": graph_type, "chrom": chrom, "subgraph": i}
             sg_prop = subgraph_properties(subgraph)
             sg_ta = subgraph_TA_sites(subgraph, bed_files[chrom], ta_error)
-            sg_df = pd.DataFrame((sg_meta | sg_prop | sg_ta))
+            sg_df = pd.DataFrame((sg_meta | sg_prop | sg_ta), index=[0])  # index doesn't matter
             subgraph_df_list.append(sg_df)
     return pd.concat(subgraph_df_list, ignore_index=True)
  
 def pcis_overlaps(target_df, reference_df):
+    """
+    Find overlaps between pCISs in the target DataFrame and reference DataFrame.
+
+    Args:
+        target_df (pandas.DataFrame): DataFrame of target pCISs
+        reference_df (pandas.DataFrame): DataFrame of reference pCISs
+
+    Returns:
+        dict: Dictionary mapping target pCIS indexes to a list of overlapping reference pCIS indexes
+    """
     # for all pCISs in target_df, find any overlap with reference_df (could be more than one or none)
     
     # start with each target subgraph, look through all reference subgraphs and record any overlap in the positions
@@ -132,6 +203,18 @@ def pcis_overlaps(target_df, reference_df):
     return overlap_dict
 
 def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs):
+    """
+    Compare pCISs between overlapping subgraphs (case vs. control).
+
+    Args:
+        target_overlaps (dict): Dictionary of overlapping pCISs
+        target_subgraphs (list): List of target subgraphs
+        reference_subgraphs (list): List of reference subgraphs
+
+    Returns:
+        pandas.DataFrame: DataFrame containing pCIS comparison results
+    """
+    
     # do case-control comparison of TAs between overlapping subgraphs (pCIS):
     # - Match TA to TA site per subgraph
     # - calculate log fold changes
@@ -150,14 +233,16 @@ def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs):
             tmp["reference"] = 0
             tmp["reference_index"] = np.nan
         else:
+            tmp_control_list = []
             for ref_ind in ref_inds:
                 ref_G = reference_subgraphs[ref_ind]
                 ref_pos = [ ref_G.nodes[node]['position'] for node in ref_G.nodes ]
-                tmp_control = pd.DataFrame([ {"reference": ref_G.nodes[node]['counts']} for node in ref_G.nodes ], index=ref_pos)                
-            # get union of all insertion sites and make it into a df
+                tmp_control = pd.DataFrame([ {"reference": ref_G.nodes[node]['counts']} for node in ref_G.nodes ], index=ref_pos)
+                tmp_control["reference_index"] = ref_ind
+                tmp_control_list.append(tmp_control)
+            tmp_control = pd.concat(tmp_control_list, axis=0)
             tmp = tmp_tar.join(tmp_control, how="outer")
             tmp = tmp.fillna(0).astype(int)
-            tmp["reference_index"] = "-".join([str(x) for x in ref_inds])
             
         tmp = tmp.reset_index(drop=False).rename(columns={"index": "pos"})
         tmp["target_index"] = tar_ind
@@ -216,6 +301,16 @@ def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs):
     return TA_df, overall_df
 
 def pcis_to_cis(overall_df, threshold):
+    """
+    Convert pCISs to CISs based on statistical significance.
+
+    Args:
+        overall_df (pandas.DataFrame): DataFrame containing overall pCIS statistics
+        threshold (float): Significance threshold for p-values
+
+    Returns:
+        pandas.DataFrame: DataFrame containing significant CISs
+    """
     # find pcis with significant pvalue that is less than the given threshold
     sig_df = overall_df[ (overall_df["mannwhitneyu"] < threshold) & (overall_df["ranksums"] < threshold) ]
     # test stat below threshold OR ratio that is not 0 and there are more than 1 sig tA
@@ -225,6 +320,16 @@ def pcis_to_cis(overall_df, threshold):
     return all_sig_df
 
 def cis_annotate(target_sig_df, annotated_df):
+    """
+    Annotate CISs with gene markers.
+
+    Args:
+        target_sig_df (pandas.DataFrame): DataFrame containing significant CISs
+        annotated_df (pandas.DataFrame): DataFrame containing gene annotations
+
+    Returns:
+        pandas.DataFrame: DataFrame containing annotated CISs
+    """
     # get genes markers to each CIS
     gene_list = []
     for row in target_sig_df.itertuples():
@@ -250,7 +355,7 @@ def cis_annotate(target_sig_df, annotated_df):
             elif sub3 and sub4:
                 sub_gene_list.append(pd.DataFrame({
                     "type": ["reference"],
-                    "type_index": [int(row.reference_index)],
+                    "type_index": [row.reference_index],
                     "marker_symbol": [gene._7],
                     "marker_name": [gene._8],
                     "marker_type": [gene._9],
@@ -274,6 +379,18 @@ def cis_annotate(target_sig_df, annotated_df):
     return pd.concat(gene_list, ignore_index=True)
       
 def volcano_plot(data, lfc, pval, threshold=0.05):
+    """
+    Create a volcano plot to visualize p-value and log fold change.
+
+    Args:
+        data (pandas.DataFrame): Data for the plot
+        lfc (str): Column name for log fold change values
+        pval (str): Column name for p-values
+        threshold (float, optional): Significance threshold for p-values. Default is 0.05.
+
+    Returns:
+        seaborn.axisgrid.FacetGrid: Volcano plot visualization
+    """
     thres = np.log10(threshold) * -1
     data[pval] = np.log10(data[pval]) * -1
     g = (
@@ -286,6 +403,15 @@ def volcano_plot(data, lfc, pval, threshold=0.05):
     return g
                 
 def aak1(gene_list):
+    """
+    Analyze the gene list for presence of specific genes and summary statistics.
+
+    Args:
+        gene_list (pandas.DataFrame): DataFrame containing gene annotations
+
+    Returns:
+        None
+    """
     print(f'Number CIS without annotation: {pd.isna(gene_list["annot_index"]).sum()}')
     a_genes = gene_list["marker_symbol"].unique()
     t_genes = gene_list[gene_list["type"] == "target"]["marker_symbol"].unique()
@@ -297,6 +423,15 @@ def aak1(gene_list):
             
 
 def main(args):
+    """
+    Main function to perform CIS analysis.
+    
+    Args:
+        args (dict): Command-line arguments
+        
+    Returns:
+        None
+    """
     verbose = args["verbose"]
     pval_threshold = 0.05
     
@@ -311,16 +446,16 @@ def main(args):
     case_subgraph_dict = get_subgraphs(args["graph_dir"], "case")
     # case_df = pd.read_csv(output / "case_df.tsv", sep="\t")
     case_df = get_subgraph_stats(case_subgraph_dict, "case", bed_files, args["ta_error"])
-    case_df.sort_values(["chr", "subgraph", "nodes"]).to_csv(args["output"] / "case_df.tsv", sep="\t", index=False)
+    case_df.sort_values(["chrom", "subgraph", "nodes"]).to_csv(args["output"] / "case_df.tsv", sep="\t", index=False)
     
     control_subgraph_dict = get_subgraphs(args["graph_dir"], "control")
-     # control_df = pd.read_csv(output / "control_df.tsv", sep="\t")
+    # control_df = pd.read_csv(output / "control_df.tsv", sep="\t")
     control_df = get_subgraph_stats(control_subgraph_dict, "control", bed_files, args["ta_error"])
-    control_df.sort_values(["chr", "subgraph", "nodes"]).to_csv(args["output"] / "control_df.tsv", sep="\t", index=False)
+    control_df.sort_values(["chrom", "subgraph", "nodes"]).to_csv(args["output"] / "control_df.tsv", sep="\t", index=False)
    
     chroms = case_df["chrom"].sort_values().unique()
     
-    all_genes_list = []
+    all_features_list = []
     # TODO: parallelize this?
     for chrom in chroms:
         # if chrom != "chr6":
@@ -342,7 +477,6 @@ def main(args):
             case_genes = cis_annotate(case_sig_df, annot_chrom_df)
             case_genes["class"] = "case"
             if verbose > 0:
-                # print(len(case_genes))
                 print(len(case_genes["marker_symbol"].unique()))
         else:
             case_genes = None
@@ -355,7 +489,6 @@ def main(args):
             control_genes = cis_annotate(control_sig_df, annot_chrom_df)
             control_genes["class"] = "control"
             if verbose > 0:
-                # print(len(control_genes))
                 print(len(control_genes["marker_symbol"].unique()))
         else:
             control_genes = None
@@ -371,7 +504,7 @@ def main(args):
         
         if case_genes is not None or control_genes is not None:
             both_genes["chrom"] = chrom
-            all_genes_list.append(both_genes)
+            all_features_list.append(both_genes)
             if verbose > 0:
                 # print(len(both_genes))
                 print(len(both_genes["marker_symbol"].unique()))
@@ -381,7 +514,8 @@ def main(args):
         print(f"""\tsig. genomic features: {both_genes["marker_symbol"].unique().shape[0]}/{annot_chrom_df["Marker Symbol"].unique().shape[0]}""")
         
     # get all genomic features
-    all_genes_df = pd.concat(all_genes_list, ignore_index=True)
+    all_features_df = pd.concat(all_features_list, ignore_index=True)
+    # all_features_df.to_csv(output / "all_genes.csv", index=False)
 
 if __name__ == "__main__": 
     main(load_args())

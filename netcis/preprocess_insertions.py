@@ -176,13 +176,12 @@ def process_bam(file, mapq_thres, chr_dict, verbose):
         return df
 
 def process_bam_helper(iter_args) -> None:
-    row, args = iter_args
+    mysample, args = iter_args
     bam_dir = args["bam_output"]
     insertions_dir = args["insertions_output"]
     thres = args["threshold"]
     chr_dict = load_chroms(args["chroms"])
     
-    mysample = row[0]
     irl_bam = bam_dir / (mysample + "_IRL.bam")
     irr_bam = bam_dir / (mysample + "_IRR.bam")
 
@@ -232,9 +231,7 @@ def process_bam_helper(iter_args) -> None:
 def main() -> None:
     main_args = load_args()
     files_df = pd.read_csv(main_args["input"], sep="\t", header=None)
-    iter_args = tqdm([ (row[1], main_args) for row in files_df.iterrows() ])
-    # with concurrent.futures.ProcessPoolExecutor(max_workers=main_args["njobs"]) as executor:
-    #   executor.map(process_bam_helper, iter_args)
+    iter_args = tqdm( [(row[1][0], main_args) for row in files_df.iterrows()] )
     with Pool(main_args["njobs"]) as p:
         [ x for x in p.imap_unordered(process_bam_helper, iter_args) ]
         p.close()

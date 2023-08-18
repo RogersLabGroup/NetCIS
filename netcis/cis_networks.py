@@ -9,7 +9,7 @@ import numpy as np
 from pandas import read_csv, concat, DataFrame
 import networkx as nx
 
-from analysis import graph_properties
+from network_analysis import graph_properties
 
     
 def load_args() -> dict:
