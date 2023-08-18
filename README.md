@@ -37,6 +37,8 @@ Data should be fastq files directly from sequencing. Preprocessing of the data h
 TODO:
 
 - input file for preprocess reads
+  - columns are sample name. irl r1, irl r2, irr r1, irr r2
+  - sample name should be formatted as <treatment>-<id> and only uses one dash ("-")
 - chrom mapper file for preprocess insertions
   - GRCm39 <https://www.ncbi.nlm.nih.gov/assembly/GCF_000001635.27/>
   - <https://genome.ucsc.edu/cgi-bin/hgTracks?chromInfoPage=&hgsid=1560703641_1YwiSDzyFEZ8nuDrTobTnwtYvReT>

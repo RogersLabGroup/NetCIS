@@ -513,7 +513,7 @@ def main(args):
             
     # get all genomic features
     all_features_df = pd.concat(all_features_list, ignore_index=True)
-    # all_features_df.to_csv(output / "all_genes.csv", index=False)
+    all_features_df.to_csv(args["output"] / "all_features.csv", index=False)
 
 if __name__ == "__main__": 
     main(load_args())
