@@ -72,8 +72,8 @@ def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_i
     else:
         keep_regions = "-L " + str(chrom_bed)
     
-    trim1_f = read_f.with_name("trim1-" + read_f.name)
-    trim1_r = read_r.with_name("trim1-" + read_r.name)
+    trim1_f = mysample_file.with_name("trim1-" + read_f.name)
+    trim1_r = mysample_file.with_name("trim1-" + read_r.name)
     sam_file = mysample_file.with_suffix(".sam")
     bam_file = mysample_file.with_suffix(".bam")
     
