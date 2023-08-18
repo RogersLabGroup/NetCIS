@@ -53,14 +53,15 @@ def convert_mapq(x) -> float:
     return np.power(10, x / (-10))
 
 def load_chroms(file) -> dict:
-    df = pd.read_csv(file, sep="\t", header=None)
-    if len(df.columns) == 1:
-        chr_dict = { row[1]: row[1] for row in df.itertuples()}
-    elif len(df.columns) == 2:
-        chr_dict = { row[1]: row[2] for row in df.itertuples()}
-    else:
-        sys.exit(f"Error: {file} does not contain one or two columns needed. See README.md for formatting this chrom_mapper file")
-    return chr_dict
+    # df = pd.read_csv(file, sep="\t", header=None)
+    # if len(df.columns) == 1:
+    #     chr_dict = { row[1]: row[1] for row in df.itertuples()}
+    # elif len(df.columns) == 2:
+    #     chr_dict = { row[1]: row[2] for row in df.itertuples()}
+    # else:
+    #     sys.exit(f"Error: {file} does not contain one or two columns needed. See README.md for formatting this chrom_mapper file")
+    # return chr_dict
+    return None
 
 def get_insertion_properties(insertion, chrdict) -> pd.DataFrame:
     """
