@@ -291,10 +291,9 @@ def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs):
             "total_TA": [total_TA],
             "TA_sig": [TA_sig],
             })
-
         TA_df_list.append(tmp)
         overall_df_list.append(tmp2)
-
+    
     TA_df = pd.concat(TA_df_list, ignore_index=True)
     overall_df = pd.concat(overall_df_list, ignore_index=True)
     overall_df["sig_ratio"] = overall_df["TA_sig"] / overall_df["total_TA"]
@@ -458,9 +457,8 @@ def main(args):
     all_features_list = []
     # TODO: parallelize this?
     for chrom in chroms:
-        # if chrom != "chr6":
-        #     continue
-        print(chrom)
+        if verbose:
+            print(chrom)
         
         # get chromosome subsets for case and control
         case_chrom_df = case_df[case_df["chrom"] == chrom]
@@ -471,27 +469,29 @@ def main(args):
         
         # cases as the target
         case_overlaps = pcis_overlaps(case_chrom_df, control_chrom_df)
-        case_TA_df, case_overall_df = compare_pcis(case_overlaps, case_chrom_subgraphs, control_chrom_subgraphs)
-        case_sig_df = pcis_to_cis(case_overall_df, pval_threshold)
-        if len(case_sig_df) != 0:
-            case_genes = cis_annotate(case_sig_df, annot_chrom_df)
-            case_genes["class"] = "case"
-            if verbose > 0:
-                print(len(case_genes["marker_symbol"].unique()))
-        else:
+        if not case_overlaps:  # if empty
             case_genes = None
+        else:
+            case_TA_df, case_overall_df = compare_pcis(case_overlaps, case_chrom_subgraphs, control_chrom_subgraphs)
+            case_sig_df = pcis_to_cis(case_overall_df, pval_threshold)
+            if len(case_sig_df) != 0:
+                case_genes = cis_annotate(case_sig_df, annot_chrom_df)
+                case_genes["class"] = "case"
+            else:
+                case_genes = None
         
         # controls as the target
         control_overlaps = pcis_overlaps(control_chrom_df, case_chrom_df)
-        control_TA_df, control_overall_df = compare_pcis(control_overlaps, control_chrom_subgraphs, case_chrom_subgraphs)
-        control_sig_df = pcis_to_cis(control_overall_df, pval_threshold)
-        if len(control_sig_df) != 0:
-            control_genes = cis_annotate(control_sig_df, annot_chrom_df)
-            control_genes["class"] = "control"
-            if verbose > 0:
-                print(len(control_genes["marker_symbol"].unique()))
-        else:
+        if not control_overlaps:  # if empty
             control_genes = None
+        else:
+            control_TA_df, control_overall_df = compare_pcis(control_overlaps, control_chrom_subgraphs, case_chrom_subgraphs)
+            control_sig_df = pcis_to_cis(control_overall_df, pval_threshold)
+            if len(control_sig_df) != 0:
+                control_genes = cis_annotate(control_sig_df, annot_chrom_df)
+                control_genes["class"] = "control"
+            else:
+                control_genes = None
         
         if case_genes is not None and control_genes is not None:
             both_genes = pd.concat([case_genes, control_genes], ignore_index=True)
@@ -499,20 +499,18 @@ def main(args):
             both_genes = case_genes
         elif control_genes is not None:
             both_genes = control_genes
-        else:
-            pass
+        else:  # both are none and there is nothing to append to the output list
+            continue
         
-        if case_genes is not None or control_genes is not None:
-            both_genes["chrom"] = chrom
-            all_features_list.append(both_genes)
-            if verbose > 0:
-                # print(len(both_genes))
-                print(len(both_genes["marker_symbol"].unique()))
-
-        # TODO: are there too many repeated genes? Does this make sense that they would be repeated?
-        # it appears that sometimes there are multiple CIS in a gene, because the CIS range is quite small
-        print(f"""\tsig. genomic features: {both_genes["marker_symbol"].unique().shape[0]}/{annot_chrom_df["Marker Symbol"].unique().shape[0]}""")
-        
+        both_genes["chrom"] = chrom
+        all_features_list.append(both_genes)
+        if verbose > 2:
+            # print(len(both_genes))
+            print(len(both_genes["marker_symbol"].unique()))
+            # TODO: are there too many repeated genes? Does this make sense that they would be repeated?
+            # it appears that sometimes there are multiple CIS in a gene, because the CIS range is quite small
+            print(f"""\tsig. genomic features: {both_genes["marker_symbol"].unique().shape[0]}/{annot_chrom_df["Marker Symbol"].unique().shape[0]}""")
+            
     # get all genomic features
     all_features_df = pd.concat(all_features_list, ignore_index=True)
     # all_features_df.to_csv(output / "all_genes.csv", index=False)
