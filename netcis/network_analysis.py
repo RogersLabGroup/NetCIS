@@ -21,12 +21,14 @@ def load_args() -> dict:
     Generate common insertion sites (CIS) using a network (graph) based approach. 
     The only parameter that will change how a CIS is generated can be control with --threshold
     
-    Usage: analysis.py --output_prefix DIR --ta_dir DIR --gene_annot FILE [options]
+    Usage: analysis.py --output_prefix DIR --ta_dir DIR --gene_annot FILE --case STR --control STR [options]
     
      -o, --output_prefix=DIR           a prefix of the output directory that will have "-analysis" appended to it
-     -b, --ta_dir=DIR                  directory that contains the TA locations for each chromosome in bed format
+     -e, --ta_dir=DIR                  directory that contains the TA locations for each chromosome in bed format
      -g, --gene_annot=FILE             MGI's mouse menetic markers excluding withdrawn genes
-
+     -a, --case=STR                    treatment type value to use as case
+     -b, --control=STR                 treatment type value to use as control
+     
     Options:
      -h, --help                        show this help message and exit
      -v, --verbose=N                   (TODO: how to allow --verbose meaning 1 as well as supplying value?) print more verbose information using 0, 1 or 2 [default: 0]
@@ -431,6 +433,8 @@ def main(args):
     Returns:
         None
     """
+    case = args["case"]
+    control = args["control"]
     verbose = args["verbose"]
     pval_threshold = 0.05
     
@@ -440,17 +444,19 @@ def main(args):
     annot_df = annot_df.sort_values("chrom")
     # TODO: what about the strand in annot_df?
 
+
     bed_files = { file.name.split(".")[0]: pd.read_csv(file, sep="\t", header=None) for file in args["ta_dir"].iterdir() }
+
     
-    case_subgraph_dict = get_subgraphs(args["graph_dir"], "case")
+    case_subgraph_dict = get_subgraphs(args["graph_dir"], case)
     # case_df = pd.read_csv(output / "case_df.tsv", sep="\t")
-    case_df = get_subgraph_stats(case_subgraph_dict, "case", bed_files, args["ta_error"])
-    case_df.sort_values(["chrom", "subgraph", "nodes"]).to_csv(args["output"] / "case_df.tsv", sep="\t", index=False)
+    case_df = get_subgraph_stats(case_subgraph_dict, case, bed_files, args["ta_error"])
+    case_df.sort_values(["chrom", "subgraph", "nodes"]).to_csv(args["output"] / f"{case}.tsv", sep="\t", index=False)
     
-    control_subgraph_dict = get_subgraphs(args["graph_dir"], "control")
+    control_subgraph_dict = get_subgraphs(args["graph_dir"], control)
     # control_df = pd.read_csv(output / "control_df.tsv", sep="\t")
-    control_df = get_subgraph_stats(control_subgraph_dict, "control", bed_files, args["ta_error"])
-    control_df.sort_values(["chrom", "subgraph", "nodes"]).to_csv(args["output"] / "control_df.tsv", sep="\t", index=False)
+    control_df = get_subgraph_stats(control_subgraph_dict, control, bed_files, args["ta_error"])
+    control_df.sort_values(["chrom", "subgraph", "nodes"]).to_csv(args["output"] / f"{control}.tsv", sep="\t", index=False)
    
     chroms = case_df["chrom"].sort_values().unique()
     
@@ -476,7 +482,7 @@ def main(args):
             case_sig_df = pcis_to_cis(case_overall_df, pval_threshold)
             if len(case_sig_df) != 0:
                 case_genes = cis_annotate(case_sig_df, annot_chrom_df)
-                case_genes["class"] = "case"
+                case_genes["treatment"] = case
             else:
                 case_genes = None
         
@@ -489,7 +495,7 @@ def main(args):
             control_sig_df = pcis_to_cis(control_overall_df, pval_threshold)
             if len(control_sig_df) != 0:
                 control_genes = cis_annotate(control_sig_df, annot_chrom_df)
-                control_genes["class"] = "control"
+                control_genes["treatment"] = control
             else:
                 control_genes = None
         
