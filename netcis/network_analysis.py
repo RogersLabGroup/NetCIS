@@ -1,3 +1,4 @@
+import pickle
 from pathlib import Path
 
 from docopt import docopt
@@ -151,30 +152,19 @@ def get_subgraphs(graph_dir, graph_type):
         chrom = graph.name.split(".")[0]
         G = nx.read_graphml(graph)
         subgraphs_by_nodes = sorted(nx.connected_components(G), key=len, reverse=True)
-        subgraph_dict[chrom] = [ G.subgraph(x) for x in subgraphs_by_nodes ]
+        subgraphs = [ G.subgraph(x) for x in subgraphs_by_nodes ]
+
+        subgraph_dict[chrom] = subgraphs
     return subgraph_dict
 
-def get_subgraph_stats(subgraph_chroms, graph_type, bed_files, ta_error):
-    """
-    Get statistics for subgraphs based on insertion sites and TA site data.
-
-    Args:
-        subgraph_chroms (dict): Dictionary of subgraphs for each chromosome
-        graph_type (str): Type of graph (e.g., 'case', 'control')
-        bed_files (dict): Dictionary of bed files containing TA site information
-        ta_error (int): The error margin for TA site matching
-
-    Returns:
-        pandas.DataFrame: DataFrame containing subgraph statistics
-    """
+def get_subgraph_stats(subgraphs, graph_type, chrom, bed_files, ta_error):
     subgraph_df_list = []
-    for chrom, subgraphs in subgraph_chroms.items():
-        for i, subgraph in enumerate(subgraphs):
-            sg_meta = {"type": graph_type, "chrom": chrom, "subgraph": i}
-            sg_prop = subgraph_properties(subgraph)
-            sg_ta = subgraph_TA_sites(subgraph, bed_files[chrom], ta_error)
-            sg_df = pd.DataFrame((sg_meta | sg_prop | sg_ta), index=[0])  # index doesn't matter
-            subgraph_df_list.append(sg_df)
+    for i, subgraph in enumerate(subgraphs):
+        sg_meta = {"type": graph_type, "chrom": chrom, "subgraph": i}
+        sg_prop = subgraph_properties(subgraph)
+        sg_ta = subgraph_TA_sites(subgraph, bed_files, ta_error)
+        sg_df = pd.DataFrame((sg_meta | sg_prop | sg_ta), index=[0])  # index doesn't matter
+        subgraph_df_list.append(sg_df)
     return pd.concat(subgraph_df_list, ignore_index=True)
  
 def pcis_overlaps(target_df, reference_df):
@@ -448,31 +438,39 @@ def main(args):
     bed_files = { file.name.split(".")[0]: pd.read_csv(file, sep="\t", header=None) for file in args["ta_dir"].iterdir() }
 
     
-    case_subgraph_dict = get_subgraphs(args["graph_dir"], case)
+    # case_subgraph_dict = get_subgraphs(args["graph_dir"], case)
     # case_df = pd.read_csv(output / "case_df.tsv", sep="\t")
-    case_df = get_subgraph_stats(case_subgraph_dict, case, bed_files, args["ta_error"])
-    case_df.sort_values(["chrom", "subgraph", "nodes"]).to_csv(args["output"] / f"{case}.tsv", sep="\t", index=False)
+    # case_df = get_subgraph_stats(case_subgraph_dict, case, bed_files, args["ta_error"])
+    # case_df.sort_values(["chrom", "subgraph", "nodes"]).to_csv(args["output"] / f"{case}.tsv", sep="\t", index=False)
     
-    control_subgraph_dict = get_subgraphs(args["graph_dir"], control)
+    # control_subgraph_dict = get_subgraphs(args["graph_dir"], control)
     # control_df = pd.read_csv(output / "control_df.tsv", sep="\t")
-    control_df = get_subgraph_stats(control_subgraph_dict, control, bed_files, args["ta_error"])
-    control_df.sort_values(["chrom", "subgraph", "nodes"]).to_csv(args["output"] / f"{control}.tsv", sep="\t", index=False)
+    # control_df = get_subgraph_stats(control_subgraph_dict, control, bed_files, args["ta_error"])
+    # control_df.sort_values(["chrom", "subgraph", "nodes"]).to_csv(args["output"] / f"{control}.tsv", sep="\t", index=False)
    
-    chroms = case_df["chrom"].sort_values().unique()
+    # chroms = case_df["chrom"].sort_values().unique()
     
     all_features_list = []
     # TODO: parallelize this?
-    for chrom in chroms:
+    for chrom in (args["graph_dir"] / case).iterdir():
+        chrom = chrom.name
         if verbose:
-            print(chrom)
+            print(chrom)ls
+            
         
-        # get chromosome subsets for case and control
-        case_chrom_df = case_df[case_df["chrom"] == chrom]
-        control_chrom_df = control_df[control_df["chrom"] == chrom]
-        case_chrom_subgraphs = case_subgraph_dict[chrom]
-        control_chrom_subgraphs = control_subgraph_dict[chrom]
+        # get chromosome subsets for annotation file, TA bed file, cases, and controls
         annot_chrom_df = annot_df[annot_df["chrom"] == chrom]
+        chrom_bed_file = bed_files[chrom]
         
+        with open(args["graph_dir"] / case / chrom / "subgraphs.pickle", 'rb') as f:
+            case_chrom_subgraphs = pickle.load(f)
+        case_chrom_df = get_subgraph_stats(case_chrom_subgraphs, case, chrom, chrom_bed_file, args["ta_error"])
+        
+        with open(args["graph_dir"] / control / chrom / "subgraphs.pickle", 'rb') as f:
+            control_chrom_subgraphs = pickle.load(f)
+        control_chrom_df = get_subgraph_stats(control_chrom_subgraphs, control, chrom, chrom_bed_file, args["ta_error"])
+
+
         # cases as the target
         case_overlaps = pcis_overlaps(case_chrom_df, control_chrom_df)
         if not case_overlaps:  # if empty

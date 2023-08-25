@@ -85,6 +85,8 @@ def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_i
     
     # keep reads that are properly paired, have a mapQ > 13 or mapP < 0.05, and are in the chrom_bed file if present
     # TODO: 8/16/23 removed mapq threshold temporarily
+    
+    # TODO: sort sam file without any filtering...?
     sam_filter = f"samtools view -@ {ntask} {keep_regions} -f 2 -u {sam_file}"  # -q 13
     sam_sort = f"samtools sort -@ {ntask} -l 9 -o {bam_file} > /dev/null 2>&1"
     sam_index = f"samtools index -@ {ntask} {bam_file}"

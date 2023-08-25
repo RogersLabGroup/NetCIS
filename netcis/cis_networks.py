@@ -1,7 +1,7 @@
 from pathlib import Path
 from multiprocessing import Pool
 from typing import Generator
-import sys
+import sys, pickle
 
 from tqdm import tqdm
 from docopt import docopt
@@ -56,7 +56,6 @@ def add_nodes(insertion_df):
         }
         return (node, attr)
     return [ add_node(x) for x in insertion_df.itertuples() ]
-
 
 def find_edges(ordered_nodes, threshold):
     """
@@ -116,7 +115,7 @@ def find_edges(ordered_nodes, threshold):
     edges_to_add = [ (x, y, {"weight": z}) for x, y, z in zip(nodes1, nodes2, nodes_dist) ]
     return edges_to_add
 
-def create_graph(chrom_df: DataFrame, save_file, threshold=50000, verbose=0) -> None:
+def create_graph(chrom_df: DataFrame, save_dir, threshold=50000, verbose=0) -> None:
     G = nx.Graph()
     chrom_df.insert(4, "counts_irr", np.where(chrom_df['library'] == 'IRR', 1, 0))
     chrom_df.insert(5, "counts_irl", np.where(chrom_df['library'] == 'IRL', 1, 0))
@@ -136,20 +135,32 @@ def create_graph(chrom_df: DataFrame, save_file, threshold=50000, verbose=0) -> 
         graph_properties(G)
 
     # save the graph
-    nx.write_graphml(G, save_file)
+    nx.write_graphml(G, save_dir / "G.graphml")
+    
+    # save subgraphs from graph
+    subgraphs_by_nodes = sorted(nx.connected_components(G), key=len, reverse=True)
+    subgraphs = [ G.subgraph(x) for x in subgraphs_by_nodes ]
+    with open(save_dir / "subgraphs.pickle", 'wb') as f:
+        pickle.dump(subgraphs, f, pickle.HIGHEST_PROTOCOL)
+    
 
 def create_graph_helper(iter_args) -> None:
-    insert_case_chrom, case_file, insert_control_chrom, control_file, threshold, verbose = iter_args
-    create_graph(insert_case_chrom, case_file, threshold, verbose)
-    create_graph(insert_control_chrom, control_file, threshold, verbose)
+    insert_case_chrom, case_chrom_dir, insert_control_chrom, control_chrom_dir, threshold, verbose = iter_args
+    create_graph(insert_case_chrom, case_chrom_dir, threshold, verbose)
+    create_graph(insert_control_chrom, control_chrom_dir, threshold, verbose)
     
 def create_graph_generator(chrom_list, insert_case, insert_control, case_dir, control_dir, args) -> Generator[tuple, None, None]:
     for chrom in chrom_list:
         insert_case_chrom = insert_case[insert_case['chr'] == chrom]    
         insert_control_chrom = insert_control[insert_control['chr'] == chrom]
-        case_file = case_dir / f"{chrom}.graphml"
-        control_file = control_dir / f"{chrom}.graphml"
-        yield ( insert_case_chrom, case_file, insert_control_chrom, control_file, args["threshold"], args["verbose"] )
+        
+        case_chrom_dir = case_dir / f"{chrom}"
+        case_chrom_dir.mkdir(parents=True, exist_ok=True)
+        
+        control_chrom_dir = control_dir / f"{chrom}"
+        control_chrom_dir.mkdir(parents=True, exist_ok=True)
+        
+        yield ( insert_case_chrom, case_chrom_dir, insert_control_chrom, control_chrom_dir, args["threshold"], args["verbose"] )
 
 def main(args) -> None:
     # prepare output
@@ -171,11 +182,12 @@ def main(args) -> None:
         # tmp_df["tumor_model"] = tumor_model
         # tmp_df["sample_id"] = sample_id
         # tmp_df["tissue"] = tissue_type.split(".")[0]  # RT/LT/S
+        
         # 2023 SB
         treatment_type, sample_id = file.name.split("-")
         tmp_df["treatment"] = treatment_type
         tmp_df["sample_id"] = sample_id
-        # tmp_df["tissue"] = tissue_type.split(".")[0]  # RT/LT/S
+        
         insert_list.append(tmp_df)
     inserts_df = concat(insert_list, ignore_index=True)
 
