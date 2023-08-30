@@ -21,8 +21,9 @@ def load_args() -> dict:
     doc = """  
     Generate common insertion sites (CIS) using a network (graph) based approach. 
     The only parameter that will change how a CIS is generated can be control with --threshold
-    
-    Usage: analysis.py --output_prefix DIR --ta_dir DIR --gene_annot FILE --case STR --control STR [options]
+    TODO: add in ability to take in multiple cases/controls?
+    Usage: 
+        analysis.py --output_prefix DIR --ta_dir DIR --gene_annot FILE --case STR --control STR [options]
     
      -o, --output_prefix=DIR           a prefix of the output directory that will have "-analysis" appended to it
      -e, --ta_dir=DIR                  directory that contains the TA locations for each chromosome in bed format
@@ -137,7 +138,7 @@ def subgraph_TA_sites(G, bed, ta_error, verbose=0):
     return {"num_insert_sites": num_insert_sites, "num_ta_sites": num_ta_sites, "num_ta_insert_sites": num_ta_insert_sites}
     
 def get_subgraphs(graph_dir, graph_type):
-    """
+    """ DEPRECATED
     Get subgraphs from the specified directory and type.
 
     Args:
@@ -165,7 +166,10 @@ def get_subgraph_stats(subgraphs, graph_type, chrom, bed_files, ta_error):
         sg_ta = subgraph_TA_sites(subgraph, bed_files, ta_error)
         sg_df = pd.DataFrame((sg_meta | sg_prop | sg_ta), index=[0])  # index doesn't matter
         subgraph_df_list.append(sg_df)
-    return pd.concat(subgraph_df_list, ignore_index=True)
+    if len(subgraph_df_list) != 0:
+        return pd.concat(subgraph_df_list, ignore_index=True)
+    else:
+        return pd.DataFrame()
  
 def pcis_overlaps(target_df, reference_df):
     """
@@ -428,48 +432,44 @@ def main(args):
     verbose = args["verbose"]
     pval_threshold = 0.05
     
+    out_dir = args["output"] / f"{case}-{control}"
+    out_dir.mkdir(exist_ok=True)
+    
     annot_df = pd.read_csv(args["gene_annot"], sep="\t")
     annot_df = annot_df[pd.notna(annot_df["genome coordinate start"])].drop("Status", axis=1)
     annot_df["chrom"] = annot_df["Chr"].apply(lambda x: f"chr{x}")
     annot_df = annot_df.sort_values("chrom")
     # TODO: what about the strand in annot_df?
 
-
-    bed_files = { file.name.split(".")[0]: pd.read_csv(file, sep="\t", header=None) for file in args["ta_dir"].iterdir() }
-
-    
-    # case_subgraph_dict = get_subgraphs(args["graph_dir"], case)
-    # case_df = pd.read_csv(output / "case_df.tsv", sep="\t")
-    # case_df = get_subgraph_stats(case_subgraph_dict, case, bed_files, args["ta_error"])
-    # case_df.sort_values(["chrom", "subgraph", "nodes"]).to_csv(args["output"] / f"{case}.tsv", sep="\t", index=False)
-    
-    # control_subgraph_dict = get_subgraphs(args["graph_dir"], control)
-    # control_df = pd.read_csv(output / "control_df.tsv", sep="\t")
-    # control_df = get_subgraph_stats(control_subgraph_dict, control, bed_files, args["ta_error"])
-    # control_df.sort_values(["chrom", "subgraph", "nodes"]).to_csv(args["output"] / f"{control}.tsv", sep="\t", index=False)
+    # bed_files = { file.name.split(".")[0]: pd.read_csv(file, sep="\t", header=None) for file in args["ta_dir"].iterdir() }
+    bed_files = {file.name.split(".")[0]: file for file in args["ta_dir"].iterdir()}
    
     # chroms = case_df["chrom"].sort_values().unique()
+    chroms = sorted([ chrom.name for chrom in (args["graph_dir"] / case).iterdir() ])
     
+    TA_list = []
+    overall_list = []
     all_features_list = []
     # TODO: parallelize this?
-    for chrom in (args["graph_dir"] / case).iterdir():
-        chrom = chrom.name
-        if verbose:
-            print(chrom)ls
-            
+    for chrom in chroms:
+        # if chrom != "chrM":
+        #     continue
+        print(chrom)
         
         # get chromosome subsets for annotation file, TA bed file, cases, and controls
         annot_chrom_df = annot_df[annot_df["chrom"] == chrom]
-        chrom_bed_file = bed_files[chrom]
+        bed_chrom_df = pd.read_csv(bed_files[chrom], sep="\t", header=None)
         
         with open(args["graph_dir"] / case / chrom / "subgraphs.pickle", 'rb') as f:
             case_chrom_subgraphs = pickle.load(f)
-        case_chrom_df = get_subgraph_stats(case_chrom_subgraphs, case, chrom, chrom_bed_file, args["ta_error"])
+        case_chrom_df = get_subgraph_stats(case_chrom_subgraphs, case, chrom, bed_chrom_df, args["ta_error"])
         
         with open(args["graph_dir"] / control / chrom / "subgraphs.pickle", 'rb') as f:
             control_chrom_subgraphs = pickle.load(f)
-        control_chrom_df = get_subgraph_stats(control_chrom_subgraphs, control, chrom, chrom_bed_file, args["ta_error"])
-
+        control_chrom_df = get_subgraph_stats(control_chrom_subgraphs, control, chrom, bed_chrom_df, args["ta_error"])
+        
+        # if verbose:
+        #     print(f"case chrom df - {len(case_chrom_df)} : control chrom df - {len(control_chrom_df)}")
 
         # cases as the target
         case_overlaps = pcis_overlaps(case_chrom_df, control_chrom_df)
@@ -477,10 +477,14 @@ def main(args):
             case_genes = None
         else:
             case_TA_df, case_overall_df = compare_pcis(case_overlaps, case_chrom_subgraphs, control_chrom_subgraphs)
+            case_TA_df["class"] = "case"
+            case_overall_df["class"] = "case"
+            case_TA_df["chrom"] = chrom
+            case_overall_df["chrom"] = chrom
             case_sig_df = pcis_to_cis(case_overall_df, pval_threshold)
             if len(case_sig_df) != 0:
                 case_genes = cis_annotate(case_sig_df, annot_chrom_df)
-                case_genes["treatment"] = case
+                case_genes["class"] = "case"            
             else:
                 case_genes = None
         
@@ -490,10 +494,14 @@ def main(args):
             control_genes = None
         else:
             control_TA_df, control_overall_df = compare_pcis(control_overlaps, control_chrom_subgraphs, case_chrom_subgraphs)
+            control_TA_df["class"] = "control"
+            control_overall_df["class"] = "control"
+            control_TA_df["chrom"] = chrom
+            control_overall_df["chrom"] = chrom
             control_sig_df = pcis_to_cis(control_overall_df, pval_threshold)
             if len(control_sig_df) != 0:
                 control_genes = cis_annotate(control_sig_df, annot_chrom_df)
-                control_genes["treatment"] = control
+                control_genes["class"] = "control"
             else:
                 control_genes = None
         
@@ -503,21 +511,31 @@ def main(args):
             both_genes = case_genes
         elif control_genes is not None:
             both_genes = control_genes
-        else:  # both are none and there is nothing to append to the output list
+        else:  # both are none
+            print("\tno significant genomic features found")
             continue
         
+        TA_list.append(pd.concat([case_TA_df, control_TA_df], ignore_index=True))
+        overall_list.append(pd.concat([case_overall_df, control_overall_df], ignore_index=True))
         both_genes["chrom"] = chrom
         all_features_list.append(both_genes)
-        if verbose > 2:
-            # print(len(both_genes))
-            print(len(both_genes["marker_symbol"].unique()))
-            # TODO: are there too many repeated genes? Does this make sense that they would be repeated?
-            # it appears that sometimes there are multiple CIS in a gene, because the CIS range is quite small
-            print(f"""\tsig. genomic features: {both_genes["marker_symbol"].unique().shape[0]}/{annot_chrom_df["Marker Symbol"].unique().shape[0]}""")
-            
-    # get all genomic features
+
+        # TODO: are there too many repeated genes? Does this make sense that they would be repeated?
+        # it appears that sometimes there are multiple CIS in a gene, because the CIS range is quite small
+        # print(f"""\tsig. genomic features: {both_genes["marker_symbol"].unique().shape[0]}/{annot_chrom_df["Marker Symbol"].unique().shape[0]}""")
+     
+    # save data
+    all_TA_df = pd.concat(TA_list, ignore_index=True)
+    all_TA_df.to_csv(out_dir / "all_TA.tsv", sep="\t", index=False)
+    # all_TA_df = pd.read_csv(output / "all_TA.tsv", sep="\t")
+
+    all_overall_df = pd.concat(overall_list, ignore_index=True)
+    all_overall_df.to_csv(out_dir / "all_overall.tsv", sep="\t", index=False)
+    # all_overall_df = pd.read_csv(output / "all_overall.tsv", sep="\t")
+
     all_features_df = pd.concat(all_features_list, ignore_index=True)
-    all_features_df.to_csv(args["output"] / "all_features.csv", index=False)
+    all_features_df.to_csv(out_dir / "all_features.tsv", sep="\t", index=False)
+    # all_features_df = pd.read_csv(output / "all_features.tsv", sep="\t")
 
 if __name__ == "__main__": 
     main(load_args())

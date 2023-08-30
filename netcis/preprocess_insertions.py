@@ -23,8 +23,6 @@ def load_args() -> dict:
     Options:
      -h, --help                         show this help message and exit
      -v, --verbose=N                    print more verbose information using 0, 1 or 2 [default: 0]
-     -c, --chroms=FILE                  (TODO: add option in code for this) a file that contains what contigs should be kept (1 columns) or what to rename the contigs to keep (2 columns). See README.md for more information.
-     -t, --threshold=N                  a float from 0 to 1 that is the maximum probability allowed that a read was mapped incorrectly [default: 0.05]
      -j, --njobs=N                      an integer for the number of parallel processes to work on multiple files at the same time [default: 1]
     """
     
@@ -43,27 +41,12 @@ def load_args() -> dict:
     # int args
     new_args["verbose"] = int(new_args["verbose"])
     new_args["njobs"] = int(new_args["njobs"])
-    
-    # float args
-    new_args["threshold"] = float(new_args["threshold"])
-        
+
+
     return new_args
 
-def convert_mapq(x) -> float:
-    return np.power(10, x / (-10))
 
-def load_chroms(file) -> dict:
-    # df = pd.read_csv(file, sep="\t", header=None)
-    # if len(df.columns) == 1:
-    #     chr_dict = { row[1]: row[1] for row in df.itertuples()}
-    # elif len(df.columns) == 2:
-    #     chr_dict = { row[1]: row[2] for row in df.itertuples()}
-    # else:
-    #     sys.exit(f"Error: {file} does not contain one or two columns needed. See README.md for formatting this chrom_mapper file")
-    # return chr_dict
-    return None
-
-def get_insertion_properties(insertion, chrdict) -> pd.DataFrame:
+def get_insertion_properties(insertion) -> pd.DataFrame:
     """
     record the insertions stats (direction, +/-, and all that)
     NOTE: here is where additional statistics and or properties for each insertion site can be added
@@ -110,7 +93,7 @@ def get_insertion_properties(insertion, chrdict) -> pd.DataFrame:
     res = pd.DataFrame.from_dict(res)
     return res
 
-def read_is_quality(read, mapq_thres, chr_dict) -> bool:
+def read_is_quality(read) -> bool:
     # that is paired
     if not read.is_paired:
         return False
@@ -118,20 +101,14 @@ def read_is_quality(read, mapq_thres, chr_dict) -> bool:
     # this is mapped
     if not read.is_mapped:
         return False
-
-    # TODO: 8/16/23 This isn't needed when we use a bowtie2 mapping that only has the chromosomes of interest and not weird contigs
-    # has a contig (chromosome) is the predefined dict
-    # if read.reference_name not in chr_dict.keys():
-    #     return False
     
-    # TODO: 8/16/23 removed mapq threshold temporarily
-    # read must have a high quality mapping score
+    # # filter reads using quality mapping score
     # if convert_mapq(read.mapping_quality) > mapq_thres:
     #     return False
     
     return True
 
-def process_bam(file, mapq_thres, chr_dict, verbose):
+def process_bam(file, verbose):
     """
     Filter out low quality insertions
     This only can run on paired read sequencing data
@@ -155,17 +132,17 @@ def process_bam(file, mapq_thres, chr_dict, verbose):
             continue
         
         # if the read1 is a quality read, then get the insertions properties
-        if read_is_quality(read1, mapq_thres, chr_dict):
-            insert_properties = get_insertion_properties(read1, chr_dict)
+        if read_is_quality(read1):
+            insert_properties = get_insertion_properties(read1)
             insertions.append(insert_properties)
                 
         # check if read 2 (the mate read) is quality and can be used for insertion properties
         else:  
-            if read_is_quality(read2, mapq_thres, chr_dict):
-                insert_properties = get_insertion_properties(read2, chr_dict)
+            if read_is_quality(read2):
+                insert_properties = get_insertion_properties(read2)
                 insertions.append(insert_properties)
     bam.close()
-    if verbose:
+    if verbose > 1:
         print(f"number of reads: {i}")
     
     # check if there were any inseritons at all to avoid errors from pandas.concat()
@@ -180,14 +157,13 @@ def process_bam_helper(iter_args) -> None:
     mysample, args = iter_args
     bam_dir = args["bam_output"]
     insertions_dir = args["insertions_output"]
-    thres = args["threshold"]
-    chr_dict = load_chroms(args["chroms"])
+    verbose = args["verbose"]
     
     irl_bam = bam_dir / (mysample + "_IRL.bam")
     irr_bam = bam_dir / (mysample + "_IRR.bam")
 
     # find quality insertion in IRR and IRL libraries and convert them to single insertion site format
-    inserts_irl_df = process_bam(irl_bam, thres, chr_dict, args["verbose"])
+    inserts_irl_df = process_bam(irl_bam, verbose)
     if (inserts_irl_df is not None):  # if no insertions present, process_bam returns None
         inserts_irl_df["library"] = "IRL"
         # set transposon promoter orientation depending on sequencing library
@@ -196,12 +172,12 @@ def process_bam_helper(iter_args) -> None:
         inserts_irl_df["strand"] = np.where(inserts_irl_df["strand"], "+", "-")
         inserts_irl_df["tpn_promoter_orient"] = np.where(inserts_irl_df["tpn_promoter_orient"], "+", "-")
     
-    inserts_irr_df = process_bam(irr_bam, thres, chr_dict, args["verbose"])
+    inserts_irr_df = process_bam(irr_bam, verbose)
     if (inserts_irr_df is not None):  # if no insertions present, process_bam returns None
         inserts_irr_df["library"] = "IRR"
         inserts_irr_df["strand"] = np.where(inserts_irr_df["strand"], "+", "-")
         inserts_irr_df["tpn_promoter_orient"] = np.where(inserts_irr_df["tpn_promoter_orient"], "+", "-")
-
+    
     # concat of a dataframe and if check if any df is None
     if inserts_irl_df is None and inserts_irr_df is None:
         return
@@ -220,14 +196,23 @@ def process_bam_helper(iter_args) -> None:
     # sort by chr, then pos
     inserts_df = inserts_df.sort_values(["chr", "pos"], ignore_index=True)
     
+    # TODO: need to update input.tsv with meta info directly below
+    # add treatment group and sampleID
+    tmp_meta = mysample.split("-")
+    if len(tmp_meta) == 3:  # 2020 SB
+        inserts_df["treatment"] = tmp_meta[2]
+        inserts_df["sampleID"] = tmp_meta[1]
+    elif len(tmp_meta) == 2:  # 2023 SB
+        inserts_df["treatment"] = tmp_meta[0]
+        inserts_df["sampleID"] = tmp_meta[1]
+    else:  # TODO: gotta change input.tsv to hold extra meta info that I can add
+        sys.exit("meta data in mysample is not formmated correctly.")
+    
     # save insertions
     inserts_df.to_csv(insertions_dir / (mysample + ".tsv"), sep="\t", index=False)
     
-    
-    # TODO: normailze per sample, per LT, RT, and S
-    # How to normalize? normalize read count?
-    
-    
+    # TODO: normailze per sample, per LT, RT, and S? How to normalize? normalize read count?
+
 
 def main() -> None:
     main_args = load_args()

@@ -1,8 +1,8 @@
+import sys, os
 from pathlib import Path
-import sys
-import os
 from multiprocessing import Pool
 
+import numpy as np
 import pandas as pd
 from Bio.Seq import Seq
 from tqdm import tqdm
@@ -28,8 +28,8 @@ def load_args() -> dict:
     Options:
      -h --help                          show this help message and exit
      -v, --verbose=N                    (TODO: NOT USED) print more verbose information using 0, 1 or 2 [default: 0]
-     -c, --chrom_bed=FILE               (TODO: add option in code for this) a .bed file containing the regions to keep. See README.md for more information
      -t, --ntask=INT                    number of threads to use that will speed up cutadapt, bowtie2, and samtools [default: 1]
+     -m, --mapq=N                       integer 0-255, higher value is higher quality. See fasta mapQ score for more info [default: 13]
      -n, --npara=INT                    number of parallel processes to preprocess multiple files at the same time [default: 1]
     """
 
@@ -44,9 +44,6 @@ def load_args() -> dict:
     
     new_args["bowtie_index"] = Path(new_args["bowtie_index"])
     
-    if new_args["chrom_bed"] is not None:
-        new_args["chrom_bed"] = Path(new_args["chrom_bed"])
-    
     new_args["input"] = Path(new_args["input"])
     
     # sequence args
@@ -55,22 +52,16 @@ def load_args() -> dict:
     new_args["primer"] = Seq(new_args["primer"])
     
     # int args
-    int_opts = ["verbose", "ntask", "npara"]
+    int_opts = ["verbose", "ntask", "npara", "mapq"]
     for opts in int_opts:
         new_args[opts] = int(new_args[opts])
         
     return new_args
 
-def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_index_dir, chrom_bed) -> None:
+def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_index_dir, mapq_thres) -> None:
     """Process forward and reverse reads: trim transposon and primer, map reads, save to bam file"""
-    
     tpn_c = tpn.complement()
     primer_c = primer.complement()
-
-    if chrom_bed is None:
-        keep_regions = ""
-    else:
-        keep_regions = "-L " + str(chrom_bed)
     
     trim1_f = mysample_file.with_name("trim1-" + read_f.name)
     trim1_r = mysample_file.with_name("trim1-" + read_r.name)
@@ -82,15 +73,11 @@ def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_i
 
     # map reads
     mapper = f"bowtie2 -p {ntask} --quiet --very-sensitive-local --local -x {genome_index_dir} -1 {trim1_f} -2 {trim1_r} -S {sam_file}"
-    
-    # keep reads that are properly paired, have a mapQ > 13 or mapP < 0.05, and are in the chrom_bed file if present
-    # TODO: 8/16/23 removed mapq threshold temporarily
-    
-    # TODO: sort sam file without any filtering...?
-    sam_filter = f"samtools view -@ {ntask} {keep_regions} -f 2 -u {sam_file}"  # -q 13
-    sam_sort = f"samtools sort -@ {ntask} -l 9 -o {bam_file} > /dev/null 2>&1"
+
+    sam_sort = f"samtools sort -@ {ntask} -u -o {sam_file} {sam_file} > /dev/null 2>&1"
+    sam_filter = f"samtools view -@ {ntask} -f 2 -q {mapq_thres} -1 -o {bam_file} {sam_file}" 
     sam_index = f"samtools index -@ {ntask} {bam_file}"
-    os.system(f"{cutadapt}; {mapper}; {sam_filter} | {sam_sort}; {sam_index}")
+    os.system(f"{cutadapt}; {mapper}; {sam_sort}; {sam_filter}; {sam_index}")
     os.system(f"rm {trim1_f} {trim1_r}")
     sys.stdout.flush()
     sys.stderr.flush()
@@ -102,22 +89,22 @@ def preprocess_read_helper(iter_args) -> None:
     data_dir = args["data"]
     bam_output_dir = args["bam_output"]
     genome_index_dir = args["bowtie_index"]
-    chrom_bed = args["chrom_bed"]
     ntask = args["ntask"]
     irl_tpn = args["irl"]
     irr_tpn = args["irr"]
     primer = args["primer"]
+    mapq_thres = args["mapq"]
     
     mysample = row[0]
     irl_F = data_dir / row[1]
     irl_R = data_dir / row[2]
     irl_file = bam_output_dir / (mysample + "_IRL")
-    preprocess_reads(irl_tpn, primer, irl_F, irl_R, irl_file, ntask, genome_index_dir, chrom_bed)
+    preprocess_reads(irl_tpn, primer, irl_F, irl_R, irl_file, ntask, genome_index_dir, mapq_thres)
     
     irr_F = data_dir / row[3]
     irr_R = data_dir / row[4]
     irr_file = bam_output_dir / (mysample + "_IRR")
-    preprocess_reads(irr_tpn, primer, irr_F, irr_R, irr_file, ntask, genome_index_dir, chrom_bed)
+    preprocess_reads(irr_tpn, primer, irr_F, irr_R, irr_file, ntask, genome_index_dir, mapq_thres)
 
 def main() -> None:
     main_args = load_args()

@@ -1,7 +1,6 @@
 from pathlib import Path
 from multiprocessing import Pool
-from typing import Generator
-import sys, pickle
+import pickle
 
 from tqdm import tqdm
 from docopt import docopt
@@ -15,14 +14,12 @@ from network_analysis import graph_properties
 def load_args() -> dict:
     doc = """  
     Generate common insertion sites (CIS) using a network (graph) based approach. 
-    The only parameter that will change how a CIS is generated can be control with --threshold
+    The only parameter that will change how a CIS is generated can be controled with --threshold
     
-    Usage: cis_networks.py --output_prefix DIR --case STR --control STR [options]
+    Usage: cis_networks.py --output_prefix DIR [options]
     
      -o, --output_prefix=DIR           a prefix of the output directory that will have "-graphs" appended to it
-     -a, --case=STR                    treatment type value to use as case
-     -b, --control=STR                 treatment type value to use as control
-     
+
     Options:
      -h, --help                        show this help message and exit
      -v, --verbose=N                   (TODO: how to allow --verbose meaning 1 as well as supplying value?) print more verbose information using 0, 1 or 2 [default: 0]
@@ -143,87 +140,48 @@ def create_graph(chrom_df: DataFrame, save_dir, threshold=50000, verbose=0) -> N
     with open(save_dir / "subgraphs.pickle", 'wb') as f:
         pickle.dump(subgraphs, f, pickle.HIGHEST_PROTOCOL)
     
-
 def create_graph_helper(iter_args) -> None:
-    insert_case_chrom, case_chrom_dir, insert_control_chrom, control_chrom_dir, threshold, verbose = iter_args
-    create_graph(insert_case_chrom, case_chrom_dir, threshold, verbose)
-    create_graph(insert_control_chrom, control_chrom_dir, threshold, verbose)
-    
-def create_graph_generator(chrom_list, insert_case, insert_control, case_dir, control_dir, args) -> Generator[tuple, None, None]:
+    treatment_chrom, treatment_chrom_dir, threshold, verbose = iter_args
+    create_graph(treatment_chrom, treatment_chrom_dir, threshold, verbose)
+ 
+def create_graph_generator(chrom_list, treatment_inserts, treatment_dir, args):
     for chrom in chrom_list:
-        insert_case_chrom = insert_case[insert_case['chr'] == chrom]    
-        insert_control_chrom = insert_control[insert_control['chr'] == chrom]
+        treatment_chrom_inserts = treatment_inserts[treatment_inserts['chr'] == chrom]    
+        treatment_chrom_dir = treatment_dir / f"{chrom}"
+        treatment_chrom_dir.mkdir(parents=True, exist_ok=True)
         
-        case_chrom_dir = case_dir / f"{chrom}"
-        case_chrom_dir.mkdir(parents=True, exist_ok=True)
-        
-        control_chrom_dir = control_dir / f"{chrom}"
-        control_chrom_dir.mkdir(parents=True, exist_ok=True)
-        
-        yield ( insert_case_chrom, case_chrom_dir, insert_control_chrom, control_chrom_dir, args["threshold"], args["verbose"] )
+        yield ( treatment_chrom_inserts, treatment_chrom_dir, args["threshold"], args["verbose"] )
 
 def main(args) -> None:
-    # prepare output
-    case_treatment = args["case"]
-    control_treatment = args["control"]
-    out_dir_case = args['output'] / case_treatment
-    out_dir_case.mkdir(parents=True, exist_ok=True)
-    out_dir_control = args['output'] / control_treatment
-    out_dir_control.mkdir(parents=True, exist_ok=True)
-
-    
-    # TODO: this is specific to 2020 SB screen, and this needs to be fixed!
-    # get all files in data dir, load each file as pandas.DataFrame, and add meta data based on the file name
-    insert_list = []
-    for file in args["insertion_dir"].iterdir():
-        tmp_df = read_csv(file, sep="\t")
-        # 2020 SB
-        # tumor_model, sample_id, tissue_type = file.name.split("-")
-        # tmp_df["tumor_model"] = tumor_model
-        # tmp_df["sample_id"] = sample_id
-        # tmp_df["tissue"] = tissue_type.split(".")[0]  # RT/LT/S
-        
-        # 2023 SB
-        treatment_type, sample_id = file.name.split("-")
-        tmp_df["treatment"] = treatment_type
-        tmp_df["sample_id"] = sample_id
-        
-        insert_list.append(tmp_df)
+    # get all files in data dir, load each file as pandas.DataFrame
+    insert_list = [ read_csv(file, sep="\t") for file in args["insertion_dir"].iterdir() ]
     inserts_df = concat(insert_list, ignore_index=True)
-
-
-    # TODO: how are we choosing case and controls?
-    # TODO: create another script to compare the union vs intersection of insertions between left and right tumors
-    # also then look at and compare insertions counts of intersection of insertions and the not intersection (Laura, 5/11/23)
-    # or more formally, the disjointed insertions
     
-    
-    # TODO: average the left and right insertions, if they are at the same insertion site
-    # 2020SB separate data into case/controls
-    # insert_case = inserts_df[inserts_df["tissue"] != "S"]
-    # insert_control = inserts_df[inserts_df["tissue"] == "S"]
-    
-    # 2023 SB
-    insert_case = inserts_df[inserts_df["treatment"] == case_treatment]
-    insert_control = inserts_df[inserts_df["treatment"] == control_treatment]
-    
-    # get all chromosomes to separate further the case/controls dataframes
     chrom_list = np.unique(inserts_df["chr"].to_numpy())
+    treatment_list = inserts_df["treatment"].unique()
     
-    # don't allow more jobs than there are chromosomes
-    jobs = args["jobs"]
-    num_chr = len(chrom_list)
-    if num_chr < jobs:
-        print(f"Reducing number of jobs from {jobs} to {num_chr}, since there are only {num_chr} chromosomes present.")
-        jobs = len(chrom_list)
+    for treatment in treatment_list:
+        print(treatment)
+        # prepare output
+        out_dir = args['output'] / treatment
+        out_dir.mkdir(parents=True, exist_ok=True)
         
-    # construct CIS network per chromosome for case and control insertions
-    iter_gen = create_graph_generator(chrom_list, insert_case, insert_control, out_dir_case, out_dir_control, args)
-    iter_gen = tqdm(iter_gen, total=num_chr)
-    with Pool(jobs) as p:
-        for _ in p.imap_unordered(create_graph_helper, iter_gen):
-            pass
-        p.close()
+        treatment_df = inserts_df[inserts_df["treatment"] == treatment]    
+    
+        # don't allow more jobs than there are chromosomes
+        jobs = args["jobs"]
+        num_chr = len(chrom_list)
+        if num_chr < jobs:
+            print(f"Reducing number of jobs from {jobs} to {num_chr}, since there are only {num_chr} chromosomes present.")
+            jobs = len(chrom_list)
+            
+        # construct CIS network per chromosome for treatment insertion
+        iter_gen = create_graph_generator(chrom_list, treatment_df, out_dir, args)
+        iter_gen = tqdm(iter_gen, total=num_chr)
+        with Pool(jobs) as p:
+            for _ in p.imap_unordered(create_graph_helper, iter_gen):
+                pass
+            p.close()
         
 if __name__ == "__main__": 
     main(load_args())
