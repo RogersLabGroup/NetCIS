@@ -1,8 +1,9 @@
 import sys
 from pathlib import Path
 
-from docopt import docopt
 import pandas as pd
+from tqdm import tqdm
+from docopt import docopt
 
 
 def load_args():
@@ -32,7 +33,8 @@ def main(args):
     insertion_dir = args["insertion_dir"]
     
     insert_list = []
-    for file in insertion_dir.iterdir():
+    files = tqdm(insertion_dir.iterdir())
+    for file in files:
         tmp_df = pd.read_csv(file, sep="\t")
         tmp_meta = file.name.split(".")[0].split("-")
         
@@ -62,7 +64,7 @@ def main(args):
     # tpn_promoter_orient is the orientation w.r.t. the IRL or IRR library
     # the color in attributes is based on tpn_promoter_orient
     out_df = pd.concat((out_df, inserts_df.iloc[:, 11:-1]), axis=1)
-    out_df.to_csv(insertion_dir.parent / "all_insertions.gff3", sep="\t", header=True, index=False)
+    out_df.to_csv(insertion_dir.parent / "all_insertions.gff3", sep="\t", header=False, index=False)
 
 if __name__ == "__main__": 
     main(load_args())

@@ -1,5 +1,6 @@
 import pickle
 from pathlib import Path
+from multiprocessing import Pool
 
 from docopt import docopt
 import pandas as pd
@@ -8,6 +9,7 @@ import seaborn.objects as so
 from seaborn import axes_style
 import networkx as nx
 from scipy.stats import chisquare, binomtest, ranksums, mannwhitneyu, skewtest, kurtosistest
+from tqdm import tqdm
 
 
 def load_args() -> dict:
@@ -33,7 +35,7 @@ def load_args() -> dict:
      
     Options:
      -h, --help                        show this help message and exit
-     -v, --verbose=N                   (TODO: how to allow --verbose meaning 1 as well as supplying value?) print more verbose information using 0, 1 or 2 [default: 0]
+     -v, --verbose=N                   print more verbose information using 0, 1 or 2 [default: 0]
      -t, --ta_error=N                  how many bases to expand the search for a TA site at each insertion [default: 5]
      -j, --jobs=N                      number of processes to run [default: 1]
     """
@@ -158,12 +160,12 @@ def get_subgraphs(graph_dir, graph_type):
         subgraph_dict[chrom] = subgraphs
     return subgraph_dict
 
-def get_subgraph_stats(subgraphs, graph_type, chrom, bed_files, ta_error):
+def get_subgraph_stats(subgraphs, graph_type, chrom, bed_df, ta_error):
     subgraph_df_list = []
     for i, subgraph in enumerate(subgraphs):
         sg_meta = {"type": graph_type, "chrom": chrom, "subgraph": i}
         sg_prop = subgraph_properties(subgraph)
-        sg_ta = subgraph_TA_sites(subgraph, bed_files, ta_error)
+        sg_ta = subgraph_TA_sites(subgraph, bed_df, ta_error)
         sg_df = pd.DataFrame((sg_meta | sg_prop | sg_ta), index=[0])  # index doesn't matter
         subgraph_df_list.append(sg_df)
     if len(subgraph_df_list) != 0:
@@ -198,7 +200,7 @@ def pcis_overlaps(target_df, reference_df):
     # I can use chrom_overlaps as the ground truth as well.
     return overlap_dict
 
-def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs):
+def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs, target, reference, chrom):
     """
     Compare pCISs between overlapping subgraphs (case vs. control).
 
@@ -223,18 +225,18 @@ def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs):
     for tar_ind, ref_inds in target_overlaps.items():
         tar_G = target_subgraphs[tar_ind]
         tar_pos = [ tar_G.nodes[node]['position'] for node in tar_G.nodes ]
-        tmp_tar = pd.DataFrame([ {"target": tar_G.nodes[node]['counts']} for node in tar_G.nodes ], index=tar_pos)        
+        tmp_tar = pd.DataFrame([ {"target_count": tar_G.nodes[node]['counts']} for node in tar_G.nodes ], index=tar_pos)        
         if len(ref_inds) == 0:
             tmp = tmp_tar
-            tmp["reference"] = 0
+            tmp["reference_count"] = 0
             tmp["reference_index"] = np.nan
         else:
             tmp_control_list = []
             for ref_ind in ref_inds:
                 ref_G = reference_subgraphs[ref_ind]
                 ref_pos = [ ref_G.nodes[node]['position'] for node in ref_G.nodes ]
-                tmp_control = pd.DataFrame([ {"reference": ref_G.nodes[node]['counts']} for node in ref_G.nodes ], index=ref_pos)
-                tmp_control["reference_index"] = ref_ind
+                tmp_control = pd.DataFrame([ {"reference_count": ref_G.nodes[node]['counts']} for node in ref_G.nodes ], index=ref_pos)
+                tmp_control["reference_index"] = int(ref_ind)
                 tmp_control_list.append(tmp_control)
             tmp_control = pd.concat(tmp_control_list, axis=0)
             tmp = tmp_tar.join(tmp_control, how="outer")
@@ -244,11 +246,11 @@ def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs):
         tmp["target_index"] = tar_ind
         
         # get stats per TA site (only count is used)
-        tmp["target_binom_pval"] = tmp.apply(lambda x: binomtest(int(x["target"]), int(x["target"]) + int(x["reference"])).pvalue, axis=1)
+        tmp["target_binom_pval"] = tmp.apply(lambda x: binomtest(int(x["target_count"]), int(x["target_count"]) + int(x["reference_count"])).pvalue, axis=1)
         tmp["target_binom_sig"] = tmp["target_binom_pval"] < 0.05
-        tmp["LFC"] = tmp.apply(lambda x: np.log2((x["target"]+1) / (x["reference"]+1)), axis=1)
+        tmp["LFC"] = tmp.apply(lambda x: np.log2((x["target_count"]+1) / (x["reference_count"]+1)), axis=1)
         # used pseudo count of 1 for log fold change, and so I wanted to show the difference in binomial test and significance with this
-        tmp["p_target_binom_pval"] = tmp.apply(lambda x: binomtest(x["target"]+1, (x["target"]+1) + (x["reference"]+1)).pvalue, axis=1)
+        tmp["p_target_binom_pval"] = tmp.apply(lambda x: binomtest(x["target_count"]+1, (x["target_count"]+1) + (x["reference_count"]+1)).pvalue, axis=1)
         tmp["p_target_binom_sig"] = tmp["p_target_binom_pval"] < 0.05
         
         # overall test stat for independence. use genomic positions. Total samples are each position times counts.
@@ -256,9 +258,9 @@ def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs):
         target_overall = []
         reference_overall = []
         for row in tmp.itertuples():
-            for pos_tmp in [row.pos] * int(row.target):
+            for pos_tmp in [row.pos] * int(row.target_count):
                 target_overall.append(int(pos_tmp))
-            for pos_tmp in [row.pos] * int(row.reference):
+            for pos_tmp in [row.pos] * int(row.reference_count):
                 reference_overall.append(int(pos_tmp))
 
         mwu = mannwhitneyu(target_overall, reference_overall).pvalue if len(reference_overall) != 0 else np.nan
@@ -276,8 +278,8 @@ def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs):
             "reference_index": [tmp["reference_index"].values[0]],
             "target_pos_min": [min(tar_pos)],
             "target_pos_max": [max(tar_pos)],
-            "reference_pos_min": [min(ref_pos)] if len(ref_inds) != 0 else [None],
-            "reference_pos_max": [max(ref_pos)] if len(ref_inds) != 0 else [None],
+            "reference_pos_min": [int(min(ref_pos))] if len(ref_inds) != 0 else [None],
+            "reference_pos_max": [int(max(ref_pos))] if len(ref_inds) != 0 else [None],
             "mannwhitneyu": [mwu],
             "ranksums": [rs], 
             #  "case-skewtest": [case_skewtest],
@@ -291,8 +293,14 @@ def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs):
         overall_df_list.append(tmp2)
     
     TA_df = pd.concat(TA_df_list, ignore_index=True)
+    TA_df["target"] = target
+    TA_df["reference"] = reference
+    TA_df["chrom"] = chrom
     overall_df = pd.concat(overall_df_list, ignore_index=True)
     overall_df["sig_ratio"] = overall_df["TA_sig"] / overall_df["total_TA"]
+    overall_df["target"] = target
+    overall_df["reference"] = reference
+    overall_df["chrom"] = chrom
     return TA_df, overall_df
 
 def pcis_to_cis(overall_df, threshold):
@@ -314,7 +322,7 @@ def pcis_to_cis(overall_df, threshold):
     all_sig_df = pd.concat([sig_df, nan_sig_df]).reset_index(drop=True)
     return all_sig_df
 
-def cis_annotate(target_sig_df, annotated_df):
+def cis_annotate(target_sig_df, annotated_df, gene_expander=50000):
     """
     Annotate CISs with gene markers.
 
@@ -331,48 +339,125 @@ def cis_annotate(target_sig_df, annotated_df):
         sub_gene_list = []
         for gene in annotated_df.itertuples():
             try:
-                sub3 = row.reference_pos_min <= gene._5
-                sub4 = row.reference_pos_max >= gene._4
+                sub3 = row.reference_pos_min <= (gene._5 + gene_expander)
+                sub4 = row.reference_pos_max >= (gene._4 - gene_expander)
             except:
                 sub3 = None
                 sub4 = None
                 
-            if (row.target_pos_min <= gene._5) and (row.target_pos_max >= gene._4):
+            if (row.target_pos_min <= (gene._5 + gene_expander)) and (row.target_pos_max >= (gene._4 - gene_expander)):
                 sub_gene_list.append(pd.DataFrame({
                     "type": ["target"],
+                    "type_name": [row.target],
                     "type_index": [int(row.target_index)],
+                    "chrom": [row.chrom],
                     "marker_symbol": [gene._7],
                     "marker_name": [gene._8],
                     "marker_type": [gene._9],
                     "marker_feature_type": [gene._10],
                     "marker_annot_index": [gene.Index],
+                    "genome coordinate start": [gene._4],
+                    "genome coordinate end": [gene._5],
+                    "genome coordinate expander": [gene_expander]
                     }))
             elif sub3 and sub4:
                 sub_gene_list.append(pd.DataFrame({
                     "type": ["reference"],
-                    "type_index": [row.reference_index],
+                    "type_name": [row.reference],
+                    "type_index": [int(row.reference_index)],
+                    "chrom": [row.chrom],
                     "marker_symbol": [gene._7],
                     "marker_name": [gene._8],
                     "marker_type": [gene._9],
                     "marker_feature_type": [gene._10],
                     "marker_annot_index": [gene.Index],
+                    "genome coordinate start": [gene._4],
+                    "genome coordinate end": [gene._5],
+                    "genome coordinate expander": [gene_expander]
                     }))
                 
         # it is possible that there were no annotations found
         if len(sub_gene_list) == 0:
             sub_gene_list.append(pd.DataFrame({
                 "type": ["target"],
+                "type_name": [row.target],
                 "type_index": [int(row.target_index)],
+                "chrom": [row.chrom],
                 "marker_symbol": [None],
                 "marker_name": [None],
                 "marker_type": [None],
                 "marker_feature_type": [None],
                 "marker_annot_index": [None],
+                "genome coordinate start": [None],
+                "genome coordinate end": [None],
+                "genome coordinate expander": [gene_expander]
                 }))
             
         gene_list.extend(sub_gene_list)
     return pd.concat(gene_list, ignore_index=True)
-      
+
+def chrom_analysis(iter_args):
+    chrom, annot_chrom_df, chrom_bed_file, args = iter_args
+    graph_dir = args["graph_dir"]
+    case = args["case"]
+    control = args["control"]
+    ta_error = args["ta_error"]
+    pval_threshold = args["pval_threshold"]
+    verbose = args["verbose"]
+    gene_expander = 50000  # TODO: add to input args
+    
+    
+    bed_chrom_df = pd.read_csv(chrom_bed_file, sep="\t", header=None)
+    
+    with open(graph_dir / case / chrom / "subgraphs.pickle", 'rb') as f:
+        case_chrom_subgraphs = pickle.load(f)
+    case_chrom_df = get_subgraph_stats(case_chrom_subgraphs, case, chrom, bed_chrom_df, ta_error)
+    
+    with open(graph_dir / control / chrom / "subgraphs.pickle", 'rb') as f:
+        control_chrom_subgraphs = pickle.load(f)
+    control_chrom_df = get_subgraph_stats(control_chrom_subgraphs, control, chrom, bed_chrom_df, ta_error)
+
+    
+    # cases as the target
+    case_overlaps = pcis_overlaps(case_chrom_df, control_chrom_df)
+    if not case_overlaps:  # if empty
+        case_features, case_TA_df, case_overall_df, case_sig_df = None, None, None, None
+    else:
+        case_TA_df, case_overall_df = compare_pcis(case_overlaps, case_chrom_subgraphs, control_chrom_subgraphs, case, control, chrom)
+        case_sig_df = pcis_to_cis(case_overall_df, pval_threshold)
+        if len(case_sig_df) != 0:
+            case_features = cis_annotate(case_sig_df, annot_chrom_df, gene_expander)
+        else:
+            case_features = None
+    
+    # controls as the target
+    control_overlaps = pcis_overlaps(control_chrom_df, case_chrom_df)
+    if not control_overlaps:  # if empty
+        control_features, control_TA_df, control_overall_df, control_sig_df = None, None, None, None
+    else:
+        control_TA_df, control_overall_df = compare_pcis(control_overlaps, control_chrom_subgraphs, case_chrom_subgraphs, control, case, chrom)
+        control_sig_df = pcis_to_cis(control_overall_df, pval_threshold)
+        if len(control_sig_df) != 0:
+            control_features = cis_annotate(control_sig_df, annot_chrom_df, gene_expander)
+        else:
+            control_features = None
+    
+    if case_features is not None or control_features is not None:
+        genomic_features_df = pd.concat([case_features, control_features], ignore_index=True)
+        if verbose:
+            print(f"""{chrom}\tsig. genomic features: {genomic_features_df["marker_symbol"].unique().shape[0]}/{annot_chrom_df["Marker Symbol"].unique().shape[0]}""")
+    else:
+        genomic_features_df = None
+        if verbose:
+            print(f"{chrom}\tno sig. genomic features found")
+
+    ta_df = pd.concat([case_TA_df, control_TA_df], ignore_index=True)
+    overall_df = pd.concat([case_overall_df, control_overall_df], ignore_index=True)
+    sig_df = pd.concat([case_sig_df, control_sig_df], ignore_index=True)
+    graph_chrom_df = pd.concat([case_chrom_df, control_chrom_df], ignore_index=True)
+    
+    return {"ta": ta_df, "overall": overall_df, "sig": sig_df, "genomic_features": genomic_features_df, "graph_stats": graph_chrom_df}
+
 def volcano_plot(data, lfc, pval, threshold=0.05):
     """
     Create a volcano plot to visualize p-value and log fold change.
@@ -429,11 +514,9 @@ def main(args):
     """
     case = args["case"]
     control = args["control"]
-    verbose = args["verbose"]
-    pval_threshold = 0.05
     
-    out_dir = args["output"] / f"{case}-{control}"
-    out_dir.mkdir(exist_ok=True)
+    output = args["output"] / f"{case}-{control}"
+    output.mkdir(exist_ok=True)
     
     annot_df = pd.read_csv(args["gene_annot"], sep="\t")
     annot_df = annot_df[pd.notna(annot_df["genome coordinate start"])].drop("Status", axis=1)
@@ -447,95 +530,40 @@ def main(args):
     # chroms = case_df["chrom"].sort_values().unique()
     chroms = sorted([ chrom.name for chrom in (args["graph_dir"] / case).iterdir() ])
     
-    TA_list = []
+    
+    # iter_args = tqdm([ (chrom, annot_df[annot_df["chrom"] == chrom], bed_files[chrom], args) for chrom in chroms ])
+    iter_args = [ (chrom, annot_df[annot_df["chrom"] == chrom], bed_files[chrom], args) for chrom in chroms ]
+    with Pool(args["npara"]) as p:
+        res_dict_list = [ x for x in p.imap_unordered(chrom_analysis, iter_args) ]
+        
+    # save data  
+    ta_list = []
     overall_list = []
-    all_features_list = []
-    # TODO: parallelize this?
-    for chrom in chroms:
-        # if chrom != "chrM":
-        #     continue
-        print(chrom)
-        
-        # get chromosome subsets for annotation file, TA bed file, cases, and controls
-        annot_chrom_df = annot_df[annot_df["chrom"] == chrom]
-        bed_chrom_df = pd.read_csv(bed_files[chrom], sep="\t", header=None)
-        
-        with open(args["graph_dir"] / case / chrom / "subgraphs.pickle", 'rb') as f:
-            case_chrom_subgraphs = pickle.load(f)
-        case_chrom_df = get_subgraph_stats(case_chrom_subgraphs, case, chrom, bed_chrom_df, args["ta_error"])
-        
-        with open(args["graph_dir"] / control / chrom / "subgraphs.pickle", 'rb') as f:
-            control_chrom_subgraphs = pickle.load(f)
-        control_chrom_df = get_subgraph_stats(control_chrom_subgraphs, control, chrom, bed_chrom_df, args["ta_error"])
-        
-        # if verbose:
-        #     print(f"case chrom df - {len(case_chrom_df)} : control chrom df - {len(control_chrom_df)}")
+    sig_list = []
+    genomic_features_list = []
+    graphs_stats = []
+    for res_dict in res_dict_list:
+        ta_list.append(res_dict["ta"])
+        overall_list.append(res_dict["overall"])
+        sig_list.append(res_dict["sig"])
+        genomic_features_list.append(res_dict["genomic_features"])
+        graphs_stats.append(res_dict["graph_stats"])
 
-        # cases as the target
-        case_overlaps = pcis_overlaps(case_chrom_df, control_chrom_df)
-        if not case_overlaps:  # if empty
-            case_genes = None
-        else:
-            case_TA_df, case_overall_df = compare_pcis(case_overlaps, case_chrom_subgraphs, control_chrom_subgraphs)
-            case_TA_df["class"] = "case"
-            case_overall_df["class"] = "case"
-            case_TA_df["chrom"] = chrom
-            case_overall_df["chrom"] = chrom
-            case_sig_df = pcis_to_cis(case_overall_df, pval_threshold)
-            if len(case_sig_df) != 0:
-                case_genes = cis_annotate(case_sig_df, annot_chrom_df)
-                case_genes["class"] = "case"            
-            else:
-                case_genes = None
-        
-        # controls as the target
-        control_overlaps = pcis_overlaps(control_chrom_df, case_chrom_df)
-        if not control_overlaps:  # if empty
-            control_genes = None
-        else:
-            control_TA_df, control_overall_df = compare_pcis(control_overlaps, control_chrom_subgraphs, case_chrom_subgraphs)
-            control_TA_df["class"] = "control"
-            control_overall_df["class"] = "control"
-            control_TA_df["chrom"] = chrom
-            control_overall_df["chrom"] = chrom
-            control_sig_df = pcis_to_cis(control_overall_df, pval_threshold)
-            if len(control_sig_df) != 0:
-                control_genes = cis_annotate(control_sig_df, annot_chrom_df)
-                control_genes["class"] = "control"
-            else:
-                control_genes = None
-        
-        if case_genes is not None and control_genes is not None:
-            both_genes = pd.concat([case_genes, control_genes], ignore_index=True)
-        elif case_genes is not None:
-            both_genes = case_genes
-        elif control_genes is not None:
-            both_genes = control_genes
-        else:  # both are none
-            print("\tno significant genomic features found")
-            continue
-        
-        TA_list.append(pd.concat([case_TA_df, control_TA_df], ignore_index=True))
-        overall_list.append(pd.concat([case_overall_df, control_overall_df], ignore_index=True))
-        both_genes["chrom"] = chrom
-        all_features_list.append(both_genes)
 
-        # TODO: are there too many repeated genes? Does this make sense that they would be repeated?
-        # it appears that sometimes there are multiple CIS in a gene, because the CIS range is quite small
-        # print(f"""\tsig. genomic features: {both_genes["marker_symbol"].unique().shape[0]}/{annot_chrom_df["Marker Symbol"].unique().shape[0]}""")
-     
-    # save data
-    all_TA_df = pd.concat(TA_list, ignore_index=True)
-    all_TA_df.to_csv(out_dir / "all_TA.tsv", sep="\t", index=False)
-    # all_TA_df = pd.read_csv(output / "all_TA.tsv", sep="\t")
+    TA_df = pd.concat(ta_list, ignore_index=True)
+    TA_df.to_csv(output / "TA.tsv", sep="\t", index=False)
 
-    all_overall_df = pd.concat(overall_list, ignore_index=True)
-    all_overall_df.to_csv(out_dir / "all_overall.tsv", sep="\t", index=False)
-    # all_overall_df = pd.read_csv(output / "all_overall.tsv", sep="\t")
+    overall_df = pd.concat(overall_list, ignore_index=True)
+    overall_df.to_csv(output / "overall.tsv", sep="\t", index=False)
 
-    all_features_df = pd.concat(all_features_list, ignore_index=True)
-    all_features_df.to_csv(out_dir / "all_features.tsv", sep="\t", index=False)
-    # all_features_df = pd.read_csv(output / "all_features.tsv", sep="\t")
+    sig_df = pd.concat(sig_list, ignore_index=True)
+    sig_df.to_csv(output / "sig.tsv", sep="\t", index=False)
 
+    genomic_features_df = pd.concat(genomic_features_list, ignore_index=True)
+    genomic_features_df.to_csv(output / "genomic_features.tsv", sep="\t", index=False)
+
+    graph_stats_df = pd.concat(graphs_stats, ignore_index=True)
+    graph_stats_df.to_csv(output / "graph_stats.tsv", sep="\t", index=False)
+    
 if __name__ == "__main__": 
     main(load_args())

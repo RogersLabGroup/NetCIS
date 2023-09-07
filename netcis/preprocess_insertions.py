@@ -66,7 +66,7 @@ def get_insertion_properties(insertion) -> pd.DataFrame:
         
     res = {
         "chr": [insertion.reference_name],
-        "pos": [insertion.reference_start],  # 0-based left most coordinate
+        "pos": [insertion.reference_start + 1],  # 0-based left most coordinate, so we need to add 1 to it to be in line with sam file and gff3 file specs
         "strand": [insertion.is_forward],
         "ref_length": [insertion.reference_length],
         "query_length": [
