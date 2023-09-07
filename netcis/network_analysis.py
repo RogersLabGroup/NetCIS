@@ -318,7 +318,7 @@ def pcis_to_cis(overall_df, threshold):
         pandas.DataFrame: DataFrame containing significant CISs
     """
     # find pcis with significant pvalue that is less than the given threshold
-    sig_df = overall_df[ (overall_df["mannwhitneyu"] < threshold) & (overall_df["ranksums"] < threshold) ]
+    sig_df = overall_df[ (overall_df["mannwhitneyu"] < threshold) | (overall_df["ranksums"] < threshold) ]
     # test stat below threshold OR ratio that is not 0 and there are more than 1 sig tA
     nan_df =  overall_df[ pd.isna(overall_df["mannwhitneyu"]) & pd.isna(overall_df["ranksums"]) ]
     nan_sig_df = nan_df[ (nan_df["sig_ratio"] != 0) & (nan_df["TA_sig"] > 1) ]
