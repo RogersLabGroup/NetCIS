@@ -26,7 +26,7 @@ input="2020_SB/input.tsv"
 irl_tpn="AAATTTGTGGAGTAGTTGAAAAACGAGTTTTAATGACTCCAACTTAAGTGTATGTAAACTTCCGACTTCAACTG"
 irr_tpn="GGATTAAATGTCAGGAATTGTGAAAAAGTGAGTTTAAATGTATTTGGCTAAGGTGTATGTAAACTTCCGACTTCAACTG"
 primer="GTAATACGACTCACTATAGGGCTCCGCTTAAGGGAC"
-python netcis/preprocess_reads.py -d $fastq -o $output_prefix -b $bowtieIndex -i $input -l $irl_tpn -r $irr_tpn -p $primer -t $ntasks -n $npara -t $ntasks -n $npara  # -c $chrom_bed
+python netcis/preprocess_reads.py -d $fastq -o $output_prefix -b $bowtieIndex -i $input -l $irl_tpn -r $irr_tpn -p $primer -t $ntasks -n $npara -t $ntasks -n $npara -m 0
 
 njobs=$((ntasks * npara))
 mapP_thresh=0.05

@@ -38,13 +38,13 @@ def load_args() -> dict:
      -v, --verbose=N                   print more verbose information using 0, 1 or 2 [default: 0]
      -t, --ta_error=N                  how many bases to expand the search for a TA site at each insertion [default: 5]
      -p, --pval_threshold              p-value to exclude pCIS for significance [default: 0.05]
-     -j, --jobs=N                      number of processes to run [default: 1]
+     -j, --njobs=N                     number of processes to run [default: 1]
     """
 
     # remove "--" from args
     new_args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
 
-    int_opts = ["verbose", "ta_error", "jobs"]
+    int_opts = ["verbose", "ta_error", "njobs"]
     for opts in int_opts:
         new_args[opts] = int(new_args[opts])
     
@@ -533,10 +533,16 @@ def main(args):
     # chroms = case_df["chrom"].sort_values().unique()
     chroms = sorted([ chrom.name for chrom in (args["graph_dir"] / case).iterdir() ])
     
-    
+    # don't allow more jobs than there are chromosomes
+    jobs = args["njobs"]
+    num_chr = len(chroms)
+    if num_chr < jobs:
+        print(f"Reducing number of jobs from {jobs} to {num_chr}, since there are only {num_chr} chromosomes present.")
+        jobs = len(chroms)
+            
     # iter_args = tqdm([ (chrom, annot_df[annot_df["chrom"] == chrom], bed_files[chrom], args) for chrom in chroms ])
     iter_args = [ (chrom, annot_df[annot_df["chrom"] == chrom], bed_files[chrom], args) for chrom in chroms ]
-    with Pool(args["jobs"]) as p:
+    with Pool(args["njobs"]) as p:
         res_dict_list = [ x for x in p.imap_unordered(chrom_analysis, iter_args) ]
         
     # save data  

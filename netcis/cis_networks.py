@@ -24,13 +24,13 @@ def load_args() -> dict:
      -h, --help                        show this help message and exit
      -v, --verbose=N                   (TODO: how to allow --verbose meaning 1 as well as supplying value?) print more verbose information using 0, 1 or 2 [default: 0]
      -t, --threshold=N                 maximum distance to connect two insertions together in the CIS network. We suggest not going over the default value [default: 50000]
-     -j, --jobs=N                      number of processes to run [default: 1]
+     -j, --njobs=N                     number of processes to run [default: 1]
     """
 
     # remove "--" from args
     new_args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
 
-    int_opts = ["verbose", "threshold", "jobs"]
+    int_opts = ["verbose", "threshold", "njobs"]
     for opts in int_opts:
         new_args[opts] = int(new_args[opts])
 
@@ -169,7 +169,7 @@ def main(args) -> None:
         treatment_df = inserts_df[inserts_df["treatment"] == treatment]    
     
         # don't allow more jobs than there are chromosomes
-        jobs = args["jobs"]
+        jobs = args["njobs"]
         num_chr = len(chrom_list)
         if num_chr < jobs:
             print(f"Reducing number of jobs from {jobs} to {num_chr}, since there are only {num_chr} chromosomes present.")
