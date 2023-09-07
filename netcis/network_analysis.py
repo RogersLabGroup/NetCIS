@@ -37,6 +37,7 @@ def load_args() -> dict:
      -h, --help                        show this help message and exit
      -v, --verbose=N                   print more verbose information using 0, 1 or 2 [default: 0]
      -t, --ta_error=N                  how many bases to expand the search for a TA site at each insertion [default: 5]
+     -p, --pval_threshold              p-value to exclude pCIS for significance [default: 0.05]
      -j, --jobs=N                      number of processes to run [default: 1]
     """
 
@@ -46,7 +47,9 @@ def load_args() -> dict:
     int_opts = ["verbose", "ta_error", "jobs"]
     for opts in int_opts:
         new_args[opts] = int(new_args[opts])
-
+    
+    new_args["pval_threshold"] = float(new_args["pval_threshold"])
+    
     new_args["graph_dir"] = Path(new_args["output_prefix"] + "-graphs")
     new_args["ta_dir"] = Path(new_args["ta_dir"])
     new_args["gene_annot"] = Path(new_args["gene_annot"])
@@ -533,7 +536,7 @@ def main(args):
     
     # iter_args = tqdm([ (chrom, annot_df[annot_df["chrom"] == chrom], bed_files[chrom], args) for chrom in chroms ])
     iter_args = [ (chrom, annot_df[annot_df["chrom"] == chrom], bed_files[chrom], args) for chrom in chroms ]
-    with Pool(args["npara"]) as p:
+    with Pool(args["jobs"]) as p:
         res_dict_list = [ x for x in p.imap_unordered(chrom_analysis, iter_args) ]
         
     # save data  
