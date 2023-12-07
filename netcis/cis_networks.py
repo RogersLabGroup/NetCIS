@@ -5,10 +5,9 @@ import pickle
 from tqdm import tqdm
 from docopt import docopt
 import numpy as np
+import pandas as pd
 from pandas import read_csv, concat, DataFrame
 import networkx as nx
-
-from network_analysis import graph_properties
 
     
 def load_args() -> dict:
@@ -35,9 +34,33 @@ def load_args() -> dict:
         new_args[opts] = int(new_args[opts])
 
     new_args["insertion_dir"] = Path(new_args["output_prefix"] + "-insertions")
+    new_args["depth_dir"] = Path(new_args["output_prefix"] + "-insertions-depth")
     new_args["output"] = Path(new_args["output_prefix"] + "-graphs")
 
     return new_args
+
+def graph_properties(G, verbose=0):
+    """
+    Calculate various properties of a graph.
+
+    Args:
+        G (networkx.Graph): The input graph
+        verbose (int, optional): Verbosity level. Default is 0.
+
+    Returns:
+        dict: Dictionary containing graph properties
+    """
+    nodes = G.number_of_nodes()
+    edges = G.number_of_edges()
+    num_inserts = sum([ G.nodes[node]["counts"] for node in G.nodes ])
+    subgraphs_by_nodes = sorted(nx.connected_components(G), key=len, reverse=True)
+    num_subgraphs = len(subgraphs_by_nodes)
+    if verbose:
+        print(f"number of nodes: {nodes}")
+        print(f"number of edges: {edges}")
+        print(f"number of insertions: {num_inserts}")
+        print(f"number of subgraphs (pCIS) {num_subgraphs}")
+    return {"nodes": nodes, "edges": edges, "num_inserts": num_inserts, "num_subgraphs": num_subgraphs}
 
 def add_nodes(insertion_df):
     def add_node(insert):
@@ -45,11 +68,13 @@ def add_nodes(insertion_df):
         attr = {
             "position": insert.pos,
             "chrom": insert.chr,
+            "CPM": insert.CPM,
             "counts": insert.counts,
             "counts_irr": insert.counts_irr,
             "counts_irl": insert.counts_irl,
-            "counts_trp_orient_pos": insert.counts_trp_orient_pos,
-            "counts_trp_orient_neg": insert.counts_trp_orient_neg,
+            # "counts_trp_orient_pos": insert.counts_trp_orient_pos,
+            # "counts_trp_orient_neg": insert.counts_trp_orient_neg,
+            "sample_IDs": insert.sample_IDs,
         }
         return (node, attr)
     return [ add_node(x) for x in insertion_df.itertuples() ]
@@ -69,7 +94,7 @@ def find_edges(ordered_nodes, threshold):
             continue
         # find distance between nodes using their position
         node_dist = abs(G.nodes[other_node]["position"] - G.nodes[new_node]["position"])
-        # double check don't add edge to self
+        # double check don"t add edge to self
         if node_dist == 0:
             continue
         # if distance between node(i) and node(j) is less than threshold
@@ -79,7 +104,7 @@ def find_edges(ordered_nodes, threshold):
             G.add_edge(new_node, other_node, weight=1 / node_dist)
     """ 
     # nodes are inherently ordered as they are added in the graph,
-    # however, the ordering doens't have to numerically make sense for this function
+    # however, the ordering doens"t have to numerically make sense for this function
     
     
     # set up the nodes to be a numpy array for easy indexing
@@ -112,17 +137,31 @@ def find_edges(ordered_nodes, threshold):
     edges_to_add = [ (x, y, {"weight": z}) for x, y, z in zip(nodes1, nodes2, nodes_dist) ]
     return edges_to_add
 
-def create_graph(chrom_df: DataFrame, save_dir, threshold=50000, verbose=0) -> None:
+def create_graph(iter_args):
+    chrom_df, save_dir, threshold, verbose = iter_args
+
     G = nx.Graph()
-    chrom_df.insert(4, "counts_irr", np.where(chrom_df['library'] == 'IRR', 1, 0))
-    chrom_df.insert(5, "counts_irl", np.where(chrom_df['library'] == 'IRL', 1, 0))
-    chrom_df.insert(6, "counts_trp_orient_pos", np.where(chrom_df['tpn_promoter_orient'] == '+', 1, 0))
-    chrom_df.insert(7, "counts_trp_orient_neg", np.where(chrom_df['tpn_promoter_orient'] == '-', 1, 0))
+    # get counts for library and tpn orientation
+    chrom_df.insert(4, "counts_irr", np.where(chrom_df["library"] == "IRR", 1, 0))
+    chrom_df.insert(5, "counts_irl", np.where(chrom_df["library"] == "IRL", 1, 0))
+    chrom_df.insert(6, "counts_trp_orient_pos", np.where(chrom_df["tpn_promoter_orient"] == "+", 1, 0))
+    chrom_df.insert(7, "counts_trp_orient_neg", np.where(chrom_df["tpn_promoter_orient"] == "-", 1, 0))
     cols = ["counts_irr", "counts_irl", "counts_trp_orient_pos", "counts_trp_orient_neg"]
     
-    tmp_group = chrom_df.groupby(by=['chr', 'pos'], sort=False, as_index=False, dropna=False)
+    # find read counts at each insertions site
+    tmp_group = chrom_df.groupby(by=["chr", "pos"], sort=False, as_index=False, dropna=False)
     insertion_nodes_df = tmp_group[cols].sum()
-    insertion_nodes_df.insert(2, "counts", tmp_group['read_name'].count().pop('read_name'))
+    insertion_nodes_df.insert(2, "counts", tmp_group["read_name"].count().pop("read_name"))
+
+    # add in info about which samples are in each insertion site
+    tmp_samples = chrom_df.groupby(by=["chr", "pos"], sort=False, as_index=False, dropna=False)["sampleID"].apply(lambda x: x.unique())
+    
+    if tmp_samples.size == 0:
+        insertion_nodes_df["n_samples"] = 0
+        insertion_nodes_df["sample_IDs"] = []
+    else:
+        insertion_nodes_df.insert(7, "n_samples", tmp_samples["sampleID"].apply(lambda x: len(x)))
+        insertion_nodes_df.insert(7, "sample_IDs", tmp_samples["sampleID"].apply(lambda x: list(x)).to_list())
 
     # add nodes and edges to graph
     G.add_nodes_from(add_nodes(insertion_nodes_df))
@@ -132,21 +171,17 @@ def create_graph(chrom_df: DataFrame, save_dir, threshold=50000, verbose=0) -> N
         graph_properties(G)
 
     # save the graph
-    nx.write_graphml(G, save_dir / "G.graphml")
+    nx.write_gml(G, save_dir / "G.gml")
     
     # save subgraphs from graph
     subgraphs_by_nodes = sorted(nx.connected_components(G), key=len, reverse=True)
     subgraphs = [ G.subgraph(x) for x in subgraphs_by_nodes ]
-    with open(save_dir / "subgraphs.pickle", 'wb') as f:
+    with open(save_dir / "subgraphs.pickle", "wb") as f:
         pickle.dump(subgraphs, f, pickle.HIGHEST_PROTOCOL)
     
-def create_graph_helper(iter_args) -> None:
-    treatment_chrom, treatment_chrom_dir, threshold, verbose = iter_args
-    create_graph(treatment_chrom, treatment_chrom_dir, threshold, verbose)
- 
 def create_graph_generator(chrom_list, treatment_inserts, treatment_dir, args):
     for chrom in chrom_list:
-        treatment_chrom_inserts = treatment_inserts[treatment_inserts['chr'] == chrom]    
+        treatment_chrom_inserts = treatment_inserts[treatment_inserts["chr"] == chrom]
         treatment_chrom_dir = treatment_dir / f"{chrom}"
         treatment_chrom_dir.mkdir(parents=True, exist_ok=True)
         
@@ -160,29 +195,41 @@ def main(args) -> None:
     chrom_list = np.unique(inserts_df["chr"].to_numpy())
     treatment_list = inserts_df["treatment"].unique()
     
+    # total unique samples across all treatments
+    total_samples = inserts_df["sampleID"].unique().shape[0]
+    metadata = {"total": total_samples}
+
     for treatment in treatment_list:
         print(treatment)
         # prepare output
-        out_dir = args['output'] / treatment
+        out_dir = args["output"] / treatment
         out_dir.mkdir(parents=True, exist_ok=True)
         
-        treatment_df = inserts_df[inserts_df["treatment"] == treatment]    
-    
+        treatment_df = inserts_df[inserts_df["treatment"] == treatment]
+        
+        treatment_samples = treatment_df["sampleID"].unique().shape[0]
+        metadata[treatment] = treatment_samples
+        
         # don't allow more jobs than there are chromosomes
         jobs = args["njobs"]
         num_chr = len(chrom_list)
         if num_chr < jobs:
             print(f"Reducing number of jobs from {jobs} to {num_chr}, since there are only {num_chr} chromosomes present.")
             jobs = len(chrom_list)
-            
+        
         # construct CIS network per chromosome for treatment insertion
         iter_gen = create_graph_generator(chrom_list, treatment_df, out_dir, args)
         iter_gen = tqdm(iter_gen, total=num_chr)
         with Pool(jobs) as p:
-            for _ in p.imap_unordered(create_graph_helper, iter_gen):
+            for _ in p.imap_unordered(create_graph, iter_gen):
                 pass
             p.close()
-        
+            
+    # save sample numbers as meta data for network analysis
+    samples, counts = zip(*metadata.items())
+    meta_df = pd.DataFrame({"samples": samples, "counts": counts})
+    meta_df.to_csv(args["output"].parent / "samples_with_insertions.csv", index=False)
+
 if __name__ == "__main__": 
     main(load_args())
     

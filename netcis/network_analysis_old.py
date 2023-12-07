@@ -8,7 +8,7 @@ import numpy as np
 import seaborn.objects as so
 from seaborn import axes_style
 import networkx as nx
-from scipy.stats import chisquare, binomtest, ranksums, mannwhitneyu, skewtest, kurtosistest
+from scipy.stats import binomtest, ranksums, mannwhitneyu, wilcoxon, skewtest, kurtosistest
 from tqdm import tqdm
 
 
@@ -23,7 +23,7 @@ def load_args() -> dict:
     doc = """  
     Generate common insertion sites (CIS) using a network (graph) based approach. 
     The only parameter that will change how a CIS is generated can be control with --threshold
-    TODO: add in ability to take in multiple cases/controls?
+
     Usage: 
         analysis.py --output_prefix DIR --ta_dir DIR --gene_annot FILE --case STR --control STR [options]
     
@@ -37,7 +37,7 @@ def load_args() -> dict:
      -h, --help                        show this help message and exit
      -v, --verbose=N                   print more verbose information using 0, 1 or 2 [default: 0]
      -t, --ta_error=N                  how many bases to expand the search for a TA site at each insertion [default: 5]
-     -p, --pval_threshold              p-value to exclude pCIS for significance [default: 0.05]
+     -p, --pval_threshold=N            p-value to exclude pCIS for significance [default: 0.05]
      -j, --njobs=N                     number of processes to run [default: 1]
     """
 
@@ -99,6 +99,10 @@ def subgraph_properties(G, verbose=0):
     min_pos = min(tmp_pos)
     max_pos = max(tmp_pos)
     range_pos = max_pos - min_pos
+    
+    sample_IDs = np.unique(np.hstack([ G.nodes[node]["sample_IDs"] for node in G.nodes ]))
+    num_unique_samples = len(sample_IDs)
+    
     if verbose:
         print(f"number of nodes: {nodes}")
         print(f"number of edges: {edges}")
@@ -106,9 +110,17 @@ def subgraph_properties(G, verbose=0):
         print(f"min position: {min_pos}")
         print(f"max position: {max_pos}")
         print(f"range: {range_pos}")
-    # TODO: FIXME: total nodes and range are not inclusive. see chr7
-    # 7/10/23 - what does this mean...?
-    return {"nodes": nodes, "edges": edges, "num_inserts": num_inserts, "min_pos": min_pos, "max_pos": max_pos, "range": range_pos}
+        print(f"# of unique samples: {num_unique_samples}")
+        
+    return {"nodes": nodes, 
+            "edges": edges, 
+            "num_inserts": num_inserts, 
+            "min_pos": min_pos, 
+            "max_pos": max_pos, 
+            "range": range_pos,
+            "sample_IDs": [sample_IDs],
+            "num_unique_samples": num_unique_samples,
+            }
     
 def subgraph_TA_sites(G, bed, ta_error, verbose=0):
     """
@@ -198,9 +210,6 @@ def pcis_overlaps(target_df, reference_df):
             if (tar_sg.min_pos <= ref_sg.max_pos) and (tar_sg.max_pos >= ref_sg.min_pos):
                 overlap_list.append(ref_sg.subgraph)
         overlap_dict[tar_sg.subgraph] = overlap_list
-    # TODO: would it be easier/more efficient to compute this by whole dataframe?
-    # this is the fully coded out logic, but now can I make it better and improve my pandas skills?
-    # I can use chrom_overlaps as the ground truth as well.
     return overlap_dict
 
 def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs, target, reference, chrom):
@@ -224,7 +233,7 @@ def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs, target,
     # which can be used for the final determination if the pCIS is now a CIS
     TA_df_list = []
     overall_df_list = []
-
+    
     for tar_ind, ref_inds in target_overlaps.items():
         tar_G = target_subgraphs[tar_ind]
         tar_pos = [ tar_G.nodes[node]['position'] for node in tar_G.nodes ]
@@ -256,6 +265,7 @@ def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs, target,
         tmp["p_target_binom_pval"] = tmp.apply(lambda x: binomtest(x["target_count"]+1, (x["target_count"]+1) + (x["reference_count"]+1)).pvalue, axis=1)
         tmp["p_target_binom_sig"] = tmp["p_target_binom_pval"] < 0.05
         
+        # TODO: this needs to be changed to something better
         # overall test stat for independence. use genomic positions. Total samples are each position times counts.
         # ex.) pos: 1001 and count: 3 is [1001, 1001, 1001]
         target_overall = []
@@ -266,15 +276,24 @@ def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs, target,
             for pos_tmp in [row.pos] * int(row.reference_count):
                 reference_overall.append(int(pos_tmp))
 
-        mwu = mannwhitneyu(target_overall, reference_overall).pvalue if len(reference_overall) != 0 else np.nan
-        rs = ranksums(target_overall, reference_overall).pvalue if len(reference_overall) != 0 else np.nan
+        # mwu = mannwhitneyu(target_overall, reference_overall).pvalue if len(reference_overall) != 0 else np.nan
+        # rs = ranksums(target_overall, reference_overall).pvalue if len(reference_overall) != 0 else np.nan
+        mwu = mannwhitneyu(tmp["target_count"], tmp["reference_count"]).pvalue 
+        rs = ranksums(tmp["target_count"], tmp["reference_count"]).pvalue
+        # wc = wilcoxon(tmp["target_count"], tmp["reference_count"]).pvalue if (tmp["target_count"] - tmp["reference_count"]).sum() != 0 and len(tmp) >= 10 else np.nan 
+        binom = binomtest(tmp["target_count"].sum(), tmp["target_count"].sum() + tmp["reference_count"].sum(), 0.5).pvalue
+        
         # case_skewtest = skewtest(target_overall).pvalue if len(target_overall) >= 8 else np.nan
         # case_kurtosistest = kurtosistest(target_overall).pvalue if len(target_overall) >= 20 else np.nan
         # control_skewtest = skewtest(reference_overall).pvalue if len(reference_overall) >= 8 else np.nan
         # control_kurtosistest = kurtosistest(reference_overall).pvalue if len(reference_overall) >= 20 else np.nan
-        total_TA = len(tmp)
-        TA_sig = tmp["target_binom_sig"].sum()
-                            
+        total_IS = len(tmp)
+        sig_IS = tmp["target_binom_sig"].sum()
+        
+        
+        tar_num_unique = len(np.unique(np.hstack([ tar_G.nodes[node]["sample_IDs"] for node in tar_G.nodes ])))
+        ref_num_unique = len(np.unique(np.hstack([ ref_G.nodes[node]["sample_IDs"] for node in ref_G.nodes ]))) if len(ref_inds) != 0 else None
+
         # Other stats: Kurtosis, skewness, etc. # "stat type": ["statistic", "pvalue"],
         tmp2 = pd.DataFrame({
             "target_index": [tar_ind],
@@ -284,13 +303,21 @@ def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs, target,
             "reference_pos_min": [int(min(ref_pos))] if len(ref_inds) != 0 else [None],
             "reference_pos_max": [int(max(ref_pos))] if len(ref_inds) != 0 else [None],
             "mannwhitneyu": [mwu],
-            "ranksums": [rs], 
+            "ranksums": [rs],
+            # "wilcoxon": [wc],
+            "binomial": [binom],
             #  "case-skewtest": [case_skewtest],
             #  "case-kurtosistest": [case_kurtosistest],
             #  "control-skewtest": [control_skewtest],
             #  "control-kurtosistest": [control_kurtosistest],
-            "total_TA": [total_TA],
-            "TA_sig": [TA_sig],
+            
+            "target_num_samples": [tar_num_unique],
+            "reference_num_samples": [ref_num_unique],
+            
+            "total_IS": [total_IS],  # total_TA
+            "sig_IS": [sig_IS],  # TA_sig
+            "target_IS_count": [tmp["target_count"].sum()],
+            "reference_IS_count": [tmp["reference_count"].sum()],
             })
         TA_df_list.append(tmp)
         overall_df_list.append(tmp2)
@@ -300,7 +327,7 @@ def compare_pcis(target_overlaps, target_subgraphs, reference_subgraphs, target,
     TA_df["reference"] = reference
     TA_df["chrom"] = chrom
     overall_df = pd.concat(overall_df_list, ignore_index=True)
-    overall_df["sig_ratio"] = overall_df["TA_sig"] / overall_df["total_TA"]
+    overall_df["sig_ratio"] = overall_df["sig_IS"] / overall_df["total_IS"]
     overall_df["target"] = target
     overall_df["reference"] = reference
     overall_df["chrom"] = chrom
@@ -317,13 +344,17 @@ def pcis_to_cis(overall_df, threshold):
     Returns:
         pandas.DataFrame: DataFrame containing significant CISs
     """
-    # find pcis with significant pvalue that is less than the given threshold
-    sig_df = overall_df[ (overall_df["mannwhitneyu"] < threshold) | (overall_df["ranksums"] < threshold) ]
-    # test stat below threshold OR ratio that is not 0 and there are more than 1 sig tA
-    nan_df =  overall_df[ pd.isna(overall_df["mannwhitneyu"]) & pd.isna(overall_df["ranksums"]) ]
-    nan_sig_df = nan_df[ (nan_df["sig_ratio"] != 0) & (nan_df["TA_sig"] > 1) ]
-    all_sig_df = pd.concat([sig_df, nan_sig_df]).reset_index(drop=True)
-    return all_sig_df
+    # TODO: find a better way to find significance
+    sig_df = overall_df[ (overall_df["mannwhitneyu"] <= threshold) | (overall_df["ranksums"] <= threshold) | (overall_df["binomial"] <= threshold) ]
+    return sig_df
+
+    # # find pcis with significant pvalue that is less than the given threshold
+    # sig_df = overall_df[ (overall_df["mannwhitneyu"] <= threshold) & (overall_df["ranksums"] <= threshold) ]
+    # # test stat below threshold OR ratio that is not 0 and there are more than 1 sig tA
+    # nan_df =  overall_df[ pd.isna(overall_df["mannwhitneyu"]) & pd.isna(overall_df["ranksums"]) ]
+    # nan_sig_df = nan_df[ (nan_df["sig_ratio"] != 0) & (nan_df["sig_IS"] > 1) ]
+    # all_sig_df = pd.concat([sig_df, nan_sig_df]).reset_index(drop=True)
+    # return all_sig_df
 
 def cis_annotate(target_sig_df, annotated_df, gene_expander=50000):
     """
@@ -461,6 +492,36 @@ def chrom_analysis(iter_args):
     
     return {"ta": ta_df, "overall": overall_df, "sig": sig_df, "genomic_features": genomic_features_df, "graph_stats": graph_chrom_df}
 
+def check_dups(gene_df, case, control):
+    if len(gene_df) == 1:
+        return gene_df
+    
+    case_tmp = gene_df[gene_df["target"] == case]
+    cont_tmp = gene_df[gene_df["target"] == control]
+
+    return_list = []
+    remove_list = []
+    for _, row in case_tmp.iterrows():
+        t1 = cont_tmp["reference_index"].values == row["target_index"]
+        t2 = cont_tmp["reference_IS_count"].values == row["target_IS_count"]
+        if any(t1) and any(t2) and np.array_equal(t1, t2):
+            return_list.append(row.to_frame().T)
+            remove_list.append(cont_tmp[t1].index)
+            
+    if remove_list:
+        remove_list = remove_list[0] if len(remove_list) == 1 else [ x[0] for x in remove_list]
+        new_cont_tmp = cont_tmp.drop(index=remove_list)
+        for _, row in new_cont_tmp.iterrows():
+            t1 = case_tmp["target_index"].values == row["reference_index"]
+            t2 = case_tmp["target_IS_count"].values == row["reference_IS_count"]
+            if any(t1) and any(t2) and np.array_equal(t1, t2):
+                return_list.append(row.to_frame().T)
+            
+    if not return_list:
+        return None
+    else:
+        return pd.concat(return_list)
+        
 def volcano_plot(data, lfc, pval, threshold=0.05):
     """
     Create a volcano plot to visualize p-value and log fold change.
@@ -518,8 +579,8 @@ def main(args):
     case = args["case"]
     control = args["control"]
     
-    output = args["output"] / f"{case}-{control}"
-    output.mkdir(exist_ok=True)
+    output_res = args["output"] / f"{case}-{control}"
+    output_res.mkdir(exist_ok=True)
     
     annot_df = pd.read_csv(args["gene_annot"], sep="\t")
     annot_df = annot_df[pd.notna(annot_df["genome coordinate start"])].drop("Status", axis=1)
@@ -545,7 +606,7 @@ def main(args):
     with Pool(args["njobs"]) as p:
         res_dict_list = [ x for x in p.imap_unordered(chrom_analysis, iter_args) ]
         
-    # save data  
+    # join chromosomes results together  
     ta_list = []
     overall_list = []
     sig_list = []
@@ -558,21 +619,66 @@ def main(args):
         genomic_features_list.append(res_dict["genomic_features"])
         graphs_stats.append(res_dict["graph_stats"])
 
-
     TA_df = pd.concat(ta_list, ignore_index=True)
-    TA_df.to_csv(output / "TA.tsv", sep="\t", index=False)
-
     overall_df = pd.concat(overall_list, ignore_index=True)
-    overall_df.to_csv(output / "overall.tsv", sep="\t", index=False)
-
     sig_df = pd.concat(sig_list, ignore_index=True)
-    sig_df.to_csv(output / "sig.tsv", sep="\t", index=False)
-
     genomic_features_df = pd.concat(genomic_features_list, ignore_index=True)
-    genomic_features_df.to_csv(output / "genomic_features.tsv", sep="\t", index=False)
-
     graph_stats_df = pd.concat(graphs_stats, ignore_index=True)
-    graph_stats_df.to_csv(output / "graph_stats.tsv", sep="\t", index=False)
+    
+    
+    
+    # get candidate gene list 
+    genes_tmp = genomic_features_df[(genomic_features_df["marker_type"] == "Gene") & (genomic_features_df["marker_feature_type"] == "protein coding gene")]
+    genes_only = genes_tmp.groupby(["type_index"]).agg(list)["marker_symbol"].reset_index()
+    many_genes = pd.DataFrame({"marker_symbol": [ x for x in sorted(genes_tmp["marker_symbol"].unique()) ]})
+
+    new_genes = []
+    for i, gene in enumerate(many_genes["marker_symbol"].values):
+        tmp_annot = genomic_features_df[genomic_features_df["marker_symbol"] == gene]
+        
+        tmp_sig = sig_df[sig_df["target_index"].isin(tmp_annot["type_index"]) & sig_df["chrom"].isin(tmp_annot["chrom"])].sort_values(["target_index"])
+        tmp_sig["gene"] = gene
+        
+        # remove duplicated entries
+        tmp_gene = check_dups(tmp_sig, case, control)
+        if tmp_gene is not None:
+            new_genes.append(tmp_gene)
+        
+
+    candidate_genes = pd.concat(new_genes, ignore_index=True)
+    a = candidate_genes["target_IS_count"][candidate_genes["target"] == case].rename(case)
+    b = candidate_genes["reference_IS_count"][candidate_genes["reference"] == case].rename(case)
+    case_read_counts = pd.concat([a, b]).sort_index()
+    c = candidate_genes["target_IS_count"][candidate_genes["target"] == control].rename(control)
+    d = candidate_genes["reference_IS_count"][candidate_genes["reference"] == control].rename(control)
+    control_read_counts = pd.concat([c, d]).sort_index()
+
+    output_genes = candidate_genes.groupby(["gene"])[["mannwhitneyu", "ranksums", "binomial"]].mean().reset_index()
+    output_genes.columns = ["gene", "avg-mannwhitneyu", "avg-ranksums",  "avg-binomial"]
+    output_genes[case] = case_read_counts
+    output_genes[control] = control_read_counts
+
+
+
+    # save data
+    TA_df.to_csv(output_res / "TA.tsv", sep="\t", index=False)
+    overall_df.to_csv(output_res / "overall.tsv", sep="\t", index=False)
+    sig_df.to_csv(output_res / "sig.tsv", sep="\t", index=False)
+    genomic_features_df.to_csv(output_res / "genomic_features.tsv", sep="\t", index=False)
+    graph_stats_df.to_csv(output_res / "graph_stats.tsv", sep="\t", index=False)
+    candidate_genes.to_csv(output_res / "candidate_genes.tsv", sep="\t", index=False)
+    output_genes.to_csv(output_res / "cleaned_output_genes.tsv", sep="\t", index=False)
+
+    simple_summary = {}
+    for treatment in graph_stats_df["type"].unique():
+        treatment_df = graph_stats_df[graph_stats_df["type"] == treatment]
+        simple_summary[treatment] = {"pCIS_count": len(treatment_df),
+                                    "insertion_site_count": treatment_df["nodes"].sum(),
+                                    "reads_count": treatment_df["num_inserts"].sum(),
+                                    }
+    df = pd.DataFrame(simple_summary)
+    df.to_csv(args['graph_dir'].parent / "simple_summary.csv")
+    
     
 if __name__ == "__main__": 
     main(load_args())

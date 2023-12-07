@@ -16,9 +16,11 @@ def load_args():
     
     doc = """  
     Usage: 
-        insertions_to_gff3.py --output_prefix DIR [options]
+        insertions_to_gff3.py --output_prefix DIR --case STR --control STR [options]
     
      -o, --output_prefix=DIR           a prefix of the output directory that will have "-analysis" appended to it
+     -a, --case=STR
+     -b, --control=STR
 
     Options:
      -h, --help                        show this help message and exit
@@ -31,6 +33,8 @@ def load_args():
     
 def main(args):
     insertion_dir = args["insertion_dir"]
+    case = args["case"]
+    control = args["control"]
     
     insert_list = []
     files = tqdm(insertion_dir.iterdir())
@@ -64,6 +68,7 @@ def main(args):
     # tpn_promoter_orient is the orientation w.r.t. the IRL or IRR library
     # the color in attributes is based on tpn_promoter_orient
     out_df = pd.concat((out_df, inserts_df.iloc[:, 11:-1]), axis=1)
+    out_df = out_df[out_df["treatment"].isin([case, control])]
     out_df.to_csv(insertion_dir.parent / "all_insertions.gff3", sep="\t", header=False, index=False)
 
 if __name__ == "__main__": 

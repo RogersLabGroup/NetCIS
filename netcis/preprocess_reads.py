@@ -71,6 +71,9 @@ def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_i
     # see https://github.com/marcelm/cutadapt/issues/711 for an explanation on trimming Illumina paired-end transposon reads
     cutadapt = f"cutadapt -j {ntask} --quiet --discard-untrimmed -a {tpn}...{primer} -A {primer_c}...{tpn_c} -o {trim1_f} -p {trim1_r} {read_f} {read_r}"
 
+    # TODO: normalization here, or at least get the depth per chromosome...which would need to be mapped...
+    # TODO: is there a difference in fastq file length and samfile length after bowtie2? (there shoul be?)
+    # use length of samfile for normalization
     # map reads
     mapper = f"bowtie2 -p {ntask} --quiet --very-sensitive-local --local -x {genome_index_dir} -1 {trim1_f} -2 {trim1_r} -S {sam_file}"
 
@@ -111,7 +114,7 @@ def main() -> None:
     files_df = pd.read_csv(main_args["input"], sep="\t", header=None)
     iter_args = tqdm([ (row[1], main_args) for row in files_df.iterrows() ])
     with Pool(main_args["npara"]) as p:
-        [ x for x in p.imap_unordered(preprocess_read_helper, iter_args) ]
+        [ x for x in p.imap_unordered(preprocess_read_helper, iter_args, chunksize=1) ]
         p.close()
     
 if __name__ == "__main__":
