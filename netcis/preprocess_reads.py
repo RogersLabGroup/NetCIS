@@ -71,14 +71,11 @@ def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_i
     # see https://github.com/marcelm/cutadapt/issues/711 for an explanation on trimming Illumina paired-end transposon reads
     cutadapt = f"cutadapt -j {ntask} --quiet --discard-untrimmed -a {tpn}...{primer} -A {primer_c}...{tpn_c} -o {trim1_f} -p {trim1_r} {read_f} {read_r}"
 
-    # TODO: normalization here, or at least get the depth per chromosome...which would need to be mapped...
-    # TODO: is there a difference in fastq file length and samfile length after bowtie2? (there shoul be?)
-    # use length of samfile for normalization
     # map reads
     mapper = f"bowtie2 -p {ntask} --quiet --very-sensitive-local --local -x {genome_index_dir} -1 {trim1_f} -2 {trim1_r} -S {sam_file}"
-
+    # TODO: rename same file to prefiltering and change to bam since it holds more reads than the post filtering bam file
     sam_sort = f"samtools sort -@ {ntask} -u -o {sam_file} {sam_file} > /dev/null 2>&1"
-    sam_filter = f"samtools view -@ {ntask} -f 2 -q {mapq_thres} -1 -o {bam_file} {sam_file}" 
+    sam_filter = f"samtools view -h -@ {ntask} -f 2 -q {mapq_thres} -1 -o {bam_file} {sam_file}" 
     sam_index = f"samtools index -@ {ntask} {bam_file}"
     os.system(f"{cutadapt}; {mapper}; {sam_sort}; {sam_filter}; {sam_index}")
     os.system(f"rm {trim1_f} {trim1_r}")

@@ -114,7 +114,7 @@ def process_bam(file, verbose):
     Filter out low quality insertions
     This only can run on paired read sequencing data
     """
-
+    print(file)
     bam = pysam.AlignmentFile(file, "rb")
     # count the coverage for each contig for read normalization later on
     # divide by 2 since these are paired reads and I count two reads that are paired as one read count
