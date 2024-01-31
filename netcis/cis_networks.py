@@ -139,29 +139,21 @@ def find_edges(ordered_nodes, threshold):
 
 def create_graph(iter_args):
     chrom_df, save_dir, threshold, verbose = iter_args
-
-    G = nx.Graph()
-    # get counts for library and tpn orientation
-    chrom_df.insert(4, "counts_irr", np.where(chrom_df["library"] == "IRR", 1, 0))
-    chrom_df.insert(5, "counts_irl", np.where(chrom_df["library"] == "IRL", 1, 0))
-    chrom_df.insert(6, "counts_trp_orient_pos", np.where(chrom_df["tpn_promoter_orient"] == "+", 1, 0))
-    chrom_df.insert(7, "counts_trp_orient_neg", np.where(chrom_df["tpn_promoter_orient"] == "-", 1, 0))
-    cols = ["counts_irr", "counts_irl", "counts_trp_orient_pos", "counts_trp_orient_neg"]
     
-    # find read counts at each insertions site
-    tmp_group = chrom_df.groupby(by=["chr", "pos"], sort=False, as_index=False, dropna=False)
+    G = nx.Graph()
+    cols = ["CPM", "counts_irr", "counts_irl"]
+    tmp_group = chrom_df.groupby(by=['chr', 'pos'], sort=False, as_index=False, dropna=False)
     insertion_nodes_df = tmp_group[cols].sum()
-    insertion_nodes_df.insert(2, "counts", tmp_group["read_name"].count().pop("read_name"))
+    insertion_nodes_df.insert(2, "counts", tmp_group['count'].count().pop('count'))
 
     # add in info about which samples are in each insertion site
-    tmp_samples = chrom_df.groupby(by=["chr", "pos"], sort=False, as_index=False, dropna=False)["sampleID"].apply(lambda x: x.unique())
-    
+    tmp_samples = chrom_df.groupby(by=['chr', 'pos'], sort=False, as_index=False, dropna=False)["sampleID"].apply(lambda x: x.unique())
     if tmp_samples.size == 0:
         insertion_nodes_df["n_samples"] = 0
         insertion_nodes_df["sample_IDs"] = []
     else:
-        insertion_nodes_df.insert(7, "n_samples", tmp_samples["sampleID"].apply(lambda x: len(x)))
-        insertion_nodes_df.insert(7, "sample_IDs", tmp_samples["sampleID"].apply(lambda x: list(x)).to_list())
+        insertion_nodes_df.insert(6, "n_samples", tmp_samples["sampleID"].apply(lambda x: len(x)))
+        insertion_nodes_df.insert(6, "sample_IDs", tmp_samples["sampleID"].apply(lambda x: list(x)).to_list())
 
     # add nodes and edges to graph
     G.add_nodes_from(add_nodes(insertion_nodes_df))
@@ -189,12 +181,14 @@ def create_graph_generator(chrom_list, treatment_inserts, treatment_dir, args):
 
 def main(args) -> None:
     # get all files in data dir, load each file as pandas.DataFrame
-    insert_list = [ read_csv(file, sep="\t") for file in args["insertion_dir"].iterdir() ]
-    inserts_df = concat(insert_list, ignore_index=True)
+    insertion_list = [ pd.read_csv(file, sep="\t") for file in args["depth_dir"].iterdir() ]
+    inserts_df = pd.concat(insertion_list, ignore_index=True)
+    inserts_df.insert(4, "counts_irr", np.where(inserts_df['library'] == 'IRR', 1, 0))
+    inserts_df.insert(5, "counts_irl", np.where(inserts_df['library'] == 'IRL', 1, 0))
     
     chrom_list = np.unique(inserts_df["chr"].to_numpy())
     treatment_list = inserts_df["treatment"].unique()
-    
+
     # total unique samples across all treatments
     total_samples = inserts_df["sampleID"].unique().shape[0]
     metadata = {"total": total_samples}
@@ -202,13 +196,11 @@ def main(args) -> None:
     for treatment in treatment_list:
         print(treatment)
         # prepare output
-        out_dir = args["output"] / treatment
+        out_dir = args['output'] / treatment
         out_dir.mkdir(parents=True, exist_ok=True)
         
         treatment_df = inserts_df[inserts_df["treatment"] == treatment]
-        
-        treatment_samples = treatment_df["sampleID"].unique().shape[0]
-        metadata[treatment] = treatment_samples
+        metadata[treatment] = treatment_df["sampleID"].unique().shape[0]
         
         # don't allow more jobs than there are chromosomes
         jobs = args["njobs"]
@@ -216,10 +208,10 @@ def main(args) -> None:
         if num_chr < jobs:
             print(f"Reducing number of jobs from {jobs} to {num_chr}, since there are only {num_chr} chromosomes present.")
             jobs = len(chrom_list)
-        
+            
         # construct CIS network per chromosome for treatment insertion
         iter_gen = create_graph_generator(chrom_list, treatment_df, out_dir, args)
-        iter_gen = tqdm(iter_gen, total=num_chr)
+        iter_gen = tqdm(iter_gen)
         with Pool(jobs) as p:
             for _ in p.imap_unordered(create_graph, iter_gen):
                 pass
@@ -228,7 +220,7 @@ def main(args) -> None:
     # save sample numbers as meta data for network analysis
     samples, counts = zip(*metadata.items())
     meta_df = pd.DataFrame({"samples": samples, "counts": counts})
-    meta_df.to_csv(args["output"].parent / "samples_with_insertions.csv", index=False)
+    meta_df.to_csv(args['output'].parent / "samples_with_insertions.csv", index=False)
 
 if __name__ == "__main__": 
     main(load_args())
