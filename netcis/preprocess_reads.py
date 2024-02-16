@@ -42,6 +42,9 @@ def load_args() -> dict:
     new_args["bam_output"] = Path(new_args["output_prefix"] + "-bam")
     new_args["bam_output"].mkdir(parents=True, exist_ok=True)
     
+    new_args["report_output"] = new_args["bam_output"].with_name("reports-preprocessing")
+    new_args["report_output"].mkdir(parents=True, exist_ok=True)
+    
     new_args["bowtie_index"] = Path(new_args["bowtie_index"])
     
     new_args["input"] = Path(new_args["input"])
@@ -58,27 +61,33 @@ def load_args() -> dict:
         
     return new_args
 
-def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_index_dir, mapq_thres) -> None:
+def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_index_dir, mapq_thres, report_output) -> None:
     """Process forward and reverse reads: trim transposon and primer, map reads, save to bam file"""
     tpn_c = tpn.complement()
     primer_c = primer.complement()
     
     trim1_f = mysample_file.with_name("trim1-" + read_f.name)
     trim1_r = mysample_file.with_name("trim1-" + read_r.name)
-    sam_file = mysample_file.with_suffix(".sam")
+    pre_bam_file = mysample_file.with_suffix(".prefiltering.bam")
     bam_file = mysample_file.with_suffix(".bam")
     
-    # see https://github.com/marcelm/cutadapt/issues/711 for an explanation on trimming Illumina paired-end transposon reads
-    cutadapt = f"cutadapt -j {ntask} --quiet --discard-untrimmed -a {tpn}...{primer} -A {primer_c}...{tpn_c} -o {trim1_f} -p {trim1_r} {read_f} {read_r}"
+    cutadapt_report = mysample_file.with_suffix(".cutadapt.txt").name
+    bowtie_report = mysample_file.with_suffix(".bowtie.txt").name
+    bam_report = mysample_file.with_suffix(".idxstats.txt").name
+    
+    # trim reads: for an explanation on trimming Illumina paired-end transposon reads see https://github.com/marcelm/cutadapt/issues/711 
+    cutadapt = f"cutadapt -j {ntask} --discard-untrimmed -a {tpn}...{primer} -A {primer_c}...{tpn_c} -o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report} 2> /dev/null"
 
     # map reads
-    mapper = f"bowtie2 -p {ntask} --quiet --very-sensitive-local --local -x {genome_index_dir} -1 {trim1_f} -2 {trim1_r} -S {sam_file}"
-    # TODO: rename same file to prefiltering and change to bam since it holds more reads than the post filtering bam file
-    sam_sort = f"samtools sort -@ {ntask} -u -o {sam_file} {sam_file} > /dev/null 2>&1"
-    sam_filter = f"samtools view -h -@ {ntask} -f 2 -q {mapq_thres} -1 -o {bam_file} {sam_file}" 
+    mapper = f"bowtie2 -p {ntask} --very-sensitive-local --local -x {genome_index_dir} -1 {trim1_f} -2 {trim1_r} -S {pre_bam_file} 2> {report_output / bowtie_report}"
+    
+    # filter reads
+    sam_sort = f"samtools sort -@ {ntask} -o {pre_bam_file} {pre_bam_file} > /dev/null 2>&1"
+    sam_filter = f"samtools view -h -@ {ntask} -f 2 -q {mapq_thres} -1 -o {bam_file} {pre_bam_file}"
     sam_index = f"samtools index -@ {ntask} {bam_file}"
-    os.system(f"{cutadapt}; {mapper}; {sam_sort}; {sam_filter}; {sam_index}")
-    os.system(f"rm {trim1_f} {trim1_r}")
+    sam_stats = f"samtools idxstats {bam_file} > {report_output / bam_report}"
+    os.system(f"{cutadapt}; {mapper}; {sam_sort}; {sam_filter}; {sam_index}; {sam_stats}")
+    os.system(f"rm {trim1_f} {trim1_r} {pre_bam_file}")
     sys.stdout.flush()
     sys.stderr.flush()
 
@@ -94,17 +103,18 @@ def preprocess_read_helper(iter_args) -> None:
     irr_tpn = args["irr"]
     primer = args["primer"]
     mapq_thres = args["mapq"]
+    report_output_dir = args["report_output"]
     
     mysample = row[0]
     irl_F = data_dir / row[1]
     irl_R = data_dir / row[2]
     irl_file = bam_output_dir / (mysample + "_IRL")
-    preprocess_reads(irl_tpn, primer, irl_F, irl_R, irl_file, ntask, genome_index_dir, mapq_thres)
+    preprocess_reads(irl_tpn, primer, irl_F, irl_R, irl_file, ntask, genome_index_dir, mapq_thres, report_output_dir)
     
     irr_F = data_dir / row[3]
     irr_R = data_dir / row[4]
     irr_file = bam_output_dir / (mysample + "_IRR")
-    preprocess_reads(irr_tpn, primer, irr_F, irr_R, irr_file, ntask, genome_index_dir, mapq_thres)
+    preprocess_reads(irr_tpn, primer, irr_F, irr_R, irr_file, ntask, genome_index_dir, mapq_thres, report_output_dir)
 
 def main() -> None:
     main_args = load_args()

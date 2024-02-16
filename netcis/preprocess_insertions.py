@@ -187,7 +187,6 @@ def process_bam_helper(iter_args) -> None:
     tmp_irl, irl_reads_per_chrom = process_bam(irl_bam, verbose)
     inserts_irl_df = None
     if (tmp_irl is not None):  # if no insertions present, process_bam returns None
-        # TODO: normalize read counts (counts per million)
         tmp_irl["count"] = 0  # irrelevant what this holds, it's just a count in the next line
         inserts_irl_df = tmp_irl.groupby(by=["chr", "pos"], sort=False, as_index=False, dropna=False).count()[["chr", "pos", "count"]]
         # divide each insertion site by the total reads on that chromosome
