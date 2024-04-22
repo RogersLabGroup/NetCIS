@@ -31,30 +31,27 @@ def load_args() -> dict:
     """
 
     # remove "--" from args
-    args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
+    new_args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
 
+    # files and directory args
+    new_args["data"] = Path(new_args["data"])
+    
+    new_args["bam_output"] = Path(new_args["output_prefix"] + "-read_depth_bam")
+    new_args["bam_output"].mkdir(parents=True, exist_ok=True)
+    
+    new_args["bowtie_index"] = Path(new_args["bowtie_index"])
+    
+    new_args["input"] = Path(new_args["input"])
+    
     # int args
     int_opts = ["verbose", "ntask", "npara", "mapq"]
     for opts in int_opts:
-        args[opts] = int(args[opts])
-    
-    if args["verbose"] > 1:
-        print("Arguements given")
-        for key, item in args.items():
-            print(f"\t{key}: {item}")
-        print("\n")
+        new_args[opts] = int(new_args[opts])
         
-    # files and directory args
-    args["data"] = Path(args["data"])
-    
-    args["bam_output"] = Path(args["output_prefix"] + "-read_depth_bam")
-    args["bam_output"].mkdir(parents=True, exist_ok=True)
-    
-    args["bowtie_index"] = Path(args["bowtie_index"])
-    
-    args["input"] = Path(args["input"])
+    if new_args["verbose"] > 1:
+        print(new_args)
         
-    return args
+    return new_args
 
 def preprocess_reads(read_f, read_r, mysample_file, ntask, genome_index_dir, mapq_thres) -> None:
     """Process forward and reverse reads: trim transposon and primer, map reads, save to bam file"""

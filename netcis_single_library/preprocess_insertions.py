@@ -27,30 +27,27 @@ def load_args() -> dict:
     """
     
     # remove "--" from args
-    args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
+    new_args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
+    
+    # files and directory args
+    new_args["bam_output"] = Path(new_args["output_prefix"] + "-bam")
+    new_args["bam_output"].mkdir(parents=True, exist_ok=True)
+    
+    new_args["insertions_output"] = Path(new_args["output_prefix"] + "-insertions")
+    new_args["insertions_output"].mkdir(parents=True, exist_ok=True)
+    new_args["depth_output"] = Path(new_args["output_prefix"] + "-insertions-depth")
+    new_args["depth_output"].mkdir(parents=True, exist_ok=True)
+    
+    new_args["input"] = Path(new_args["input"])
     
     # int args
-    args["verbose"] = int(args["verbose"])
-    args["njobs"] = int(args["njobs"])
-    
-    if args["verbose"] > 1:
-        print("Arguements given")
-        for key, item in args.items():
-            print(f"\t{key}: {item}")
-        print("\n")
+    new_args["verbose"] = int(new_args["verbose"])
+    new_args["njobs"] = int(new_args["njobs"])
+
+    if new_args["verbose"] > 1:
+        print(new_args)
         
-    # files and directory args
-    args["bam_output"] = Path(args["output_prefix"] + "-bam")
-    args["bam_output"].mkdir(parents=True, exist_ok=True)
-    
-    args["insertions_output"] = Path(args["output_prefix"] + "-insertions")
-    args["insertions_output"].mkdir(parents=True, exist_ok=True)
-    args["depth_output"] = Path(args["output_prefix"] + "-insertions-depth")
-    args["depth_output"].mkdir(parents=True, exist_ok=True)
-    
-    args["input"] = Path(args["input"])
-    
-    return args
+    return new_args
 
 def get_insertion_properties(insertion) -> pd.DataFrame:
     """
@@ -173,21 +170,15 @@ def process_bam_helper(iter_args) -> None:
     insertions_dir = args["insertions_output"]
     depth_dir = args["depth_output"]
     verbose = args["verbose"]
-    
-    irl_bam = bam_dir / (mysample + "_IRL.bam")
-    irl_pre = bam_dir / (mysample + "_IRL.prefiltering.bam")
-    irl_file = pysam.AlignmentFile(irl_pre, "rb")
-    irl_total_reads = irl_file.count(until_eof=True) / 2
-    assert irl_total_reads == (irl_file.mapped + irl_file.unmapped) / 2
-    irl_file.close()
-    
-    irr_bam = bam_dir / (mysample + "_IRR.bam")
-    irr_pre = bam_dir / (mysample + "_IRR.prefiltering.bam")
-    irr_file = pysam.AlignmentFile(irr_pre, "rb")
-    irr_total_reads = irr_file.count(until_eof=True) / 2
-    assert irr_total_reads == (irr_file.mapped + irr_file.unmapped) / 2
-    irr_file.close()
+       
+    bam = bam_dir / (mysample + ".bam")
+    prefilter = bam_dir / (mysample + ".prefiltering.bam")
+    prefileter_file = pysam.AlignmentFile(prefilter, "rb")
+    prefilter_total_reads = prefileter_file.count(until_eof=True) / 2
+    assert prefilter_total_reads == (prefileter_file.mapped + prefileter_file.unmapped) / 2
+    prefileter_file.close()
 
+    # TODO: which side of the transposon is being sequenced?
     # find quality insertion in IRR and IRL libraries and convert them to single insertion site format
     tmp_irl, irl_reads_per_chrom = process_bam(irl_bam, verbose)
     inserts_irl_df = None
@@ -251,19 +242,13 @@ def process_bam_helper(iter_args) -> None:
     if len(tmp_meta) == 3:  # 2020 SB
         inserts_df["treatment"] = tmp_meta[2]
         inserts_df["sampleID"] = tmp_meta[1]
-        inserts_df["tumor_model"] = tmp_meta[0].strip("PD1")
-        inserts_df["pd1_treated"] = "PD1" in tmp_meta[0]
         individual_inserts["treatment"] = tmp_meta[2]
         individual_inserts["sampleID"] = tmp_meta[1]
-        individual_inserts["tumor_model"] = tmp_meta[0].strip("PD1")
-        individual_inserts["pd1_treated"] = "PD1" in tmp_meta[0]
-        
     elif len(tmp_meta) == 2:  # 2023 SB
         inserts_df["treatment"] = tmp_meta[0]
         inserts_df["sampleID"] = tmp_meta[1]
         individual_inserts["treatment"] = tmp_meta[0]
         individual_inserts["sampleID"] = tmp_meta[1]
-        
     else:  # TODO: gotta change input.tsv to hold extra meta info that I can add
         sys.exit("meta data in mysample is not formmated correctly.")
     

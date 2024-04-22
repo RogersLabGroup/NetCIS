@@ -15,14 +15,13 @@ def load_args() -> dict:
     both an IRL and IRR library for paired-end reads from Illumina sequencing. This script uses three other
     programs that must be accessible from the command line: cutadapt, bowtie2, and samtools.
     
-    Usage: preprocess_reads.py --data DIR --output_prefix STR --bowtie_index DIR --input FILE --irl STR --irr STR --primer STR [options]
+    Usage: preprocess_reads.py --data DIR --output_prefix STR --bowtie_index DIR --input FILE --transposon STR --primer STR [options]
     
      -d, --data=DIR                     directory that contains the .fasta or .fastq files of insertions to map. Files can be compressed with gzip
      -o, --output_prefix=DIR            a directory ending with a prefix that will have "-bam" appended to it
      -b, --bowtie_index=DIR             directory that includes the common name of the bowtie2 reference genome index
      -i, --input=FILE                   a file that contains which files to preprocess. See README.md for more information
-     -l, --irl=STR                      a string that is the 5'-3' transposon sequence for the IRL library
-     -r, --irr=STR                      a string that is the 5'-3' transposon sequence for the IRR library
+     -r, --transposon=STR               a string that is the 5'-3' transposon sequence for the transposon library
      -p, --primer=STR                   a string that is the 5'-3' primer sequence
 
     Options:
@@ -34,38 +33,34 @@ def load_args() -> dict:
     """
 
     # remove "--" from args
-    args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
+    new_args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
+
+    # files and directory args
+    new_args["data"] = Path(new_args["data"])
+    
+    new_args["bam_output"] = Path(new_args["output_prefix"] + "-bam")
+    new_args["bam_output"].mkdir(parents=True, exist_ok=True)
+    
+    new_args["report_output"] = new_args["bam_output"].with_name("reports-preprocessing")
+    new_args["report_output"].mkdir(parents=True, exist_ok=True)
+    
+    new_args["bowtie_index"] = Path(new_args["bowtie_index"])
+    
+    new_args["input"] = Path(new_args["input"])
+    
+    # sequence args
+    new_args["transposon"] = Seq(new_args["transposon"])
+    new_args["primer"] = Seq(new_args["primer"])
     
     # int args
     int_opts = ["verbose", "ntask", "npara", "mapq"]
     for opts in int_opts:
-        args[opts] = int(args[opts])
-    
-    if args["verbose"] > 1:
-        print("Arguements given")
-        for key, item in args.items():
-            print(f"\t{key}: {item}")
-        print("\n")
+        new_args[opts] = int(new_args[opts])
+
+    if new_args["verbose"] > 1:
+        print(new_args)
         
-    # files and directory args
-    args["data"] = Path(args["data"])
-    
-    args["bam_output"] = Path(args["output_prefix"] + "-bam")
-    args["bam_output"].mkdir(parents=True, exist_ok=True)
-    
-    args["report_output"] = args["bam_output"].with_name("reports-preprocessing")
-    args["report_output"].mkdir(parents=True, exist_ok=True)
-    
-    args["bowtie_index"] = Path(args["bowtie_index"])
-    
-    args["input"] = Path(args["input"])
-    
-    # sequence args
-    args["irl"] = Seq(args["irl"])
-    args["irr"] = Seq(args["irr"])
-    args["primer"] = Seq(args["primer"])
-    
-    return args
+    return new_args
 
 def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_index_dir, mapq_thres, report_output) -> None:
     """Process forward and reverse reads: trim transposon and primer, map reads, save to bam file"""
@@ -106,22 +101,16 @@ def preprocess_read_helper(iter_args) -> None:
     bam_output_dir = args["bam_output"]
     genome_index_dir = args["bowtie_index"]
     ntask = args["ntask"]
-    irl_tpn = args["irl"]
-    irr_tpn = args["irr"]
+    tpn = args["transposon"]
     primer = args["primer"]
     mapq_thres = args["mapq"]
     report_output_dir = args["report_output"]
     
     mysample = row[0]
-    irl_F = data_dir / row[1]
-    irl_R = data_dir / row[2]
-    irl_file = bam_output_dir / (mysample + "_IRL")
-    preprocess_reads(irl_tpn, primer, irl_F, irl_R, irl_file, ntask, genome_index_dir, mapq_thres, report_output_dir)
-    
-    irr_F = data_dir / row[3]
-    irr_R = data_dir / row[4]
-    irr_file = bam_output_dir / (mysample + "_IRR")
-    preprocess_reads(irr_tpn, primer, irr_F, irr_R, irr_file, ntask, genome_index_dir, mapq_thres, report_output_dir)
+    tpn_F = data_dir / row[1]
+    tpn_R = data_dir / row[2]
+    irl_file = bam_output_dir / (mysample)
+    preprocess_reads(tpn, primer, tpn_F, tpn_R, irl_file, ntask, genome_index_dir, mapq_thres, report_output_dir)
 
 def main() -> None:
     main_args = load_args()

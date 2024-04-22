@@ -16,32 +16,37 @@ def load_args():
     
     doc = """  
     Usage: 
-        insertions_to_gff3.py --output_prefix DIR --case STR --control STR [options]
+        insertions_to_gff3.py --output_prefix DIR --treatment STR [options]
     
      -o, --output_prefix=DIR           a prefix of the output directory that will have "-analysis" appended to it
-     -a, --case=STR
-     -b, --control=STR
+     -t, --treatment=STR
 
     Options:
      -h, --help                        show this help message and exit
+     -v, --verbose=N                   print more verbose information if available using 0, 1 or 2 [default: 0]
+
     """
 
     # remove "--" from args
     new_args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
     new_args["insertion_dir"] = Path(new_args["output_prefix"] + "-insertions")
+    new_args["verbose"] = int(new_args["verbose"])
+    
+    if new_args["verbose"] > 1:
+        print(new_args)
+        
     return new_args
     
 def main(args):
     insertion_dir = args["insertion_dir"]
-    case = args["case"]
-    control = args["control"]
+    treatment = args["treatment"]
     
     insert_list = []
-    files = tqdm(insertion_dir.iterdir())
-    for file in files:
+    for file in insertion_dir.iterdir():
         tmp_df = pd.read_csv(file, sep="\t")
         tmp_meta = file.name.split(".")[0].split("-")
-        
+        # TODO: this needs to be cleaned up and a better standard implemented.
+        # maybe a standardized meta-data file?
         if len(tmp_meta) == 3:  # 2020 SB
             tmp_df["treatment"] = tmp_meta[2]
             tmp_df["sampleID"] = tmp_meta[1]
@@ -68,8 +73,8 @@ def main(args):
     # tpn_promoter_orient is the orientation w.r.t. the IRL or IRR library
     # the color in attributes is based on tpn_promoter_orient
     out_df = pd.concat((out_df, inserts_df.iloc[:, 11:-1]), axis=1)
-    out_df = out_df[out_df["treatment"].isin([case, control])]
-    out_df.to_csv(insertion_dir.parent / "all_insertions.gff3", sep="\t", header=False, index=False)
+    out_df = out_df[out_df["treatment"] == treatment]
+    out_df.to_csv(insertion_dir.parent / f"{treatment}.gff3", sep="\t", header=False, index=False)
 
 if __name__ == "__main__": 
     main(load_args())
