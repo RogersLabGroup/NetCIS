@@ -441,7 +441,21 @@ def main(args):
     IS_df.to_csv(output_res / "IS.tsv", sep="\t", index=False)
     
     CIS_list = [ res_dict["cis"] for res_dict in res_dict_list ]
-    CIS_df = pd.concat(CIS_list, ignore_index=True)
+    # TODO: prevent deprecation warning
+    """
+    /project/cs-myers/MathewF/projects/Laura-SB-Analysis/NetCIS/netcis/cis_networks.py:449: 
+        FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. 
+        In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. 
+        To retain the old behavior, exclude the relevant entries before the concat operation.
+            CIS_df = pd.concat(new_CIS_list, ignore_index=True)
+    """
+    # remove empty dataframes. slated for future deprecation in pandas api
+    new_CIS_list = []
+    for cis in CIS_list:
+        if not cis.empty and cis.notnull().any().any() and len(cis) >= 1:
+            new_CIS_list.append(cis)
+            
+    CIS_df = pd.concat(new_CIS_list, ignore_index=True)
     CIS_df.to_csv(output_res / "CIS.tsv", sep="\t", index=False) 
     
 if __name__ == "__main__": 

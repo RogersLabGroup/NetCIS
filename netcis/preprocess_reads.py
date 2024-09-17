@@ -10,7 +10,7 @@ from docopt import docopt
 
 
 def load_args() -> dict:
-    doc = """  
+    doc = """
     Preprocess .fasta/.fastq files used in Sleeping Beauty transposon mutagenesis screening that used
     both an IRL and IRR library for paired-end reads from Illumina sequencing. This script uses three other
     programs that must be accessible from the command line: cutadapt, bowtie2, and samtools.
@@ -28,7 +28,6 @@ def load_args() -> dict:
     Options:
      -h --help                          show this help message and exit
      -v, --verbose=N                    print more verbose information if available using 0, 1 or 2 [default: 0]
-     -m, --mapq=N                       integer 0-255, higher value is higher quality. See fasta mapQ score for more info [default: 13]
      -t, --ntask=INT                    number of threads to use that will speed up cutadapt, bowtie2, and samtools [default: 1]
      -n, --npara=INT                    number of parallel processes to process multiple files at the same time [default: 1]
     """
@@ -67,7 +66,7 @@ def load_args() -> dict:
     
     return args
 
-def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_index_dir, mapq_thres, report_output) -> None:
+def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_index_dir, report_output) -> None:
     """Process forward and reverse reads: trim transposon and primer, map reads, save to bam file"""
     tpn_c = tpn.complement()
     primer_c = primer.complement()
@@ -89,7 +88,7 @@ def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_i
     
     # filter reads
     sam_sort = f"samtools sort -@ {ntask} -o {pre_bam_file} {pre_bam_file} > /dev/null 2>&1"
-    sam_filter = f"samtools view -h -@ {ntask} -f 2 -q {mapq_thres} -1 -o {bam_file} {pre_bam_file}"
+    sam_filter = f"samtools view -h -@ {ntask} -f 2 -1 -o {bam_file} {pre_bam_file}"
     sam_index = f"samtools index -@ {ntask} {bam_file}"
     sam_index2 = f"samtools index -@ {ntask} {pre_bam_file}"
     sam_stats = f"samtools idxstats {bam_file} > {report_output / bam_report}"
@@ -109,19 +108,18 @@ def preprocess_read_helper(iter_args) -> None:
     irl_tpn = args["irl"]
     irr_tpn = args["irr"]
     primer = args["primer"]
-    mapq_thres = args["mapq"]
     report_output_dir = args["report_output"]
     
     mysample = row[0]
     irl_F = data_dir / row[1]
     irl_R = data_dir / row[2]
     irl_file = bam_output_dir / (mysample + "_IRL")
-    preprocess_reads(irl_tpn, primer, irl_F, irl_R, irl_file, ntask, genome_index_dir, mapq_thres, report_output_dir)
+    preprocess_reads(irl_tpn, primer, irl_F, irl_R, irl_file, ntask, genome_index_dir, report_output_dir)
     
     irr_F = data_dir / row[3]
     irr_R = data_dir / row[4]
     irr_file = bam_output_dir / (mysample + "_IRR")
-    preprocess_reads(irr_tpn, primer, irr_F, irr_R, irr_file, ntask, genome_index_dir, mapq_thres, report_output_dir)
+    preprocess_reads(irr_tpn, primer, irr_F, irr_R, irr_file, ntask, genome_index_dir, report_output_dir)
 
 def main() -> None:
     main_args = load_args()

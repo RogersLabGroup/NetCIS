@@ -23,6 +23,7 @@ def load_args() -> dict:
     Options:
      -h, --help                         show this help message and exit
      -v, --verbose=N                    print more verbose information if available using 0, 1 or 2 [default: 0]
+     -m, --mapq=N                       integer 0-255, higher value is higher quality. See fasta mapQ score for more info [default: 13]
      -j, --njobs=N                      an integer for the number of parallel processes to work on multiple files at the same time [default: 1]
     """
     
@@ -99,7 +100,7 @@ def get_insertion_properties(insertion) -> pd.DataFrame:
     res = pd.DataFrame.from_dict(res)
     return res
 
-def read_is_quality(read) -> bool:
+def read_is_quality(read, mapq_thresh) -> bool:
     # that is paired
     if not read.is_paired:
         return False
@@ -108,13 +109,13 @@ def read_is_quality(read) -> bool:
     if not read.is_mapped:
         return False
     
-    # # filter reads using quality mapping score
-    # if convert_mapq(read.mapping_quality) > mapq_thres:
-    #     return False
+    # filter reads using quality mapping score
+    if read.mapping_quality > mapq_thresh:
+        return False
     
     return True
 
-def process_bam(file, verbose):
+def process_bam(file, mapq_thresh, verbose):
     """
     Filter out low quality insertions
     This only can run on paired read sequencing data
@@ -145,13 +146,13 @@ def process_bam(file, verbose):
             continue
         
         # if the read1 is a quality read, then get the insertions properties
-        if read_is_quality(read1):
+        if read_is_quality(read1, mapq_thresh):
             insert_properties = get_insertion_properties(read1)
             insertions.append(insert_properties)
                 
         # check if read 2 (the mate read) is quality and can be used for insertion properties
         else:  
-            if read_is_quality(read2):
+            if read_is_quality(read2, mapq_thresh):
                 insert_properties = get_insertion_properties(read2)
                 insertions.append(insert_properties)
                 
@@ -173,6 +174,7 @@ def process_bam_helper(iter_args) -> None:
     insertions_dir = args["insertions_output"]
     depth_dir = args["depth_output"]
     verbose = args["verbose"]
+    mapq_thresh = args['mapq']
     
     irl_bam = bam_dir / (mysample + "_IRL.bam")
     irl_pre = bam_dir / (mysample + "_IRL.prefiltering.bam")
@@ -189,7 +191,7 @@ def process_bam_helper(iter_args) -> None:
     irr_file.close()
 
     # find quality insertion in IRR and IRL libraries and convert them to single insertion site format
-    tmp_irl, irl_reads_per_chrom = process_bam(irl_bam, verbose)
+    tmp_irl, irl_reads_per_chrom = process_bam(irl_bam, mapq_thresh, verbose)
     inserts_irl_df = None
     if (tmp_irl is not None):  # if no insertions present, process_bam returns None
         tmp_irl["count"] = 0  # irrelevant what this holds, it's just a count in the next line
@@ -207,7 +209,7 @@ def process_bam_helper(iter_args) -> None:
         tmp_irl["strand"] = np.where(tmp_irl["strand"], "+", "-")
         tmp_irl["tpn_promoter_orient"] = np.where(tmp_irl["tpn_promoter_orient"], "+", "-")
         
-    tmp_irr, irr_reads_per_chrom = process_bam(irr_bam, verbose)
+    tmp_irr, irr_reads_per_chrom = process_bam(irr_bam, mapq_thresh, verbose)
     inserts_irr_df = None
     if (tmp_irr is not None):
         tmp_irr["count"] = 0
@@ -225,8 +227,8 @@ def process_bam_helper(iter_args) -> None:
     if inserts_irl_df is None and inserts_irr_df is None:
         return
     elif inserts_irl_df is None and inserts_irr_df is not None:
-        inserts_df = inserts_irr_df
         individual_inserts = tmp_irr
+        inserts_df = inserts_irr_df
     elif inserts_irl_df is not None and inserts_irr_df is None:
         individual_inserts = tmp_irl
         inserts_df = inserts_irl_df
@@ -243,7 +245,7 @@ def process_bam_helper(iter_args) -> None:
 
     # sort by chr, then pos
     inserts_df = inserts_df.sort_values(["chr", "pos"], ignore_index=True)
-    individual_inserts = individual_inserts.sort_values(["chr", "pos"], ignore_index=True)
+    individual_inserts = individual_inserts.sort_values(["chr", "pos"], ignore_index=True)  # type: ignore
     
     # TODO: need to update input.tsv with meta info directly below
     # add treatment group and sampleID

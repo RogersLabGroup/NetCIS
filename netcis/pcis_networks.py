@@ -75,8 +75,8 @@ def add_nodes(insertion_df):
         attr = {
             "position": insert.pos,
             "chrom": insert.chr,
-            "CPM": insert.CPM,
-            "counts": insert.counts,
+            "CPM": insert.CPM,  # normalized read count (counts per million)
+            "counts": insert.counts,  # read count
             "counts_irr": insert.counts_irr,
             "counts_irl": insert.counts_irl,
             # "counts_trp_orient_pos": insert.counts_trp_orient_pos,
@@ -224,10 +224,10 @@ def main(args) -> None:
                 pass
             p.close()
             
-    # save sample numbers as meta data for network analysis
-    samples, counts = zip(*metadata.items())
-    meta_df = pd.DataFrame({"samples": samples, "counts": counts})
-    meta_df.to_csv(args['output'].parent / "samples_with_insertions.csv", index=False)
+    # # save sample numbers as meta data for network analysis
+    # samples, counts = zip(*metadata.items())
+    # meta_df = pd.DataFrame({"samples": samples, "counts": counts})
+    # meta_df.to_csv(args['output'].parent / "samples_with_insertions.csv", index=False)
 
 if __name__ == "__main__": 
     main(load_args())

@@ -1,14 +1,19 @@
-import ast
+import ast, os
 from pathlib import Path
 
 from docopt import docopt
 import pandas as pd
 import numpy as np
 from scipy.stats import false_discovery_control
+from scipy.spatial.distance import squareform
+from sklearn.metrics.pairwise import pairwise_distances
+import ranky as rk
+
 import matplotlib.pyplot as plt
 import seaborn.objects as so
-from seaborn import axes_style
+from seaborn import axes_style, plotting_context
 
+# pyright: reportArgumentType=false
 
 def load_args() -> dict:
     doc = """
@@ -53,47 +58,30 @@ def load_args() -> dict:
 
     return args
 
-def filter_low_read_CIS(df, verbose=0):
-    # filter out CIS with low read counts which are highly unlikely to be influential
-    # choose threshold that maximizes the removal of 1 nad 2 nubmer of sample CIS, while not removing any with 3 or more
-    # in this case that would be 13
-    b4_values, b4_counts = np.unique(df["total_num_samples"], return_counts=True)
-    cpm_threshold = 0
-    old_tmp_str = ""
-    total_sample_threshold = 2  # TODO: should this also be a parameter?
-    while True:
-        af_values, af_counts = np.unique(df[df["total_read_count"] > cpm_threshold]["total_num_samples"], return_counts=True)
-        count_differences = 0
-        if verbose > 1:
-            print(cpm_threshold)
-        count_diff_string = ""
-        for x in zip(b4_values, b4_counts, af_values, af_counts):
-            a, b, c, d = x
-            assert a == c
-            if b-d != 0:
-                count_differences += 1
-                tmp_str = f"\tnumber of samples: {a}, CIS filtered out: {b-d}"
-                if verbose > 1:
-                    print(tmp_str)
-                count_diff_string = count_diff_string + tmp_str + '\n'
-        if count_differences > total_sample_threshold:
-            cpm_threshold -= 1
-            break
-        cpm_threshold += 1
-        old_tmp_str = count_diff_string
+def cast_indexes(df):
+    # some of the indexes are a string representation of a list and require casting to list type
+    for i, row in df.iterrows():
+        
+        case_ind = row['case_index']
+        if type(case_ind) is str:
+            df.at[i, 'case_index'] = ast.literal_eval(case_ind)
 
-    data = df[df["total_read_count"] > cpm_threshold].copy()
-    if verbose:
-        print(f"at cpm threshold {cpm_threshold}:\n{old_tmp_str}")
-        print(f"num CIS before: {len(df)}, num CIS after: {len(data)}")
-    return data
+        control_ind = row['control_index']
+        if type(control_ind) is str:
+            df.at[i, 'control_index'] = ast.literal_eval(control_ind)
+    
+    return df
 
 def process_annot_file(df, marker_type, feature_type, verbose=0):
     # preprocess annotation file
+    
     # remove genomic features that don't have a genome coordinate start
     df = df[pd.notna(df["genome coordinate start"])]
     # remove unused column
     df = df.drop("Status", axis=1)
+    # remove genes that are heritable phenotypic markers to NaN
+    # TODO: need a more flexible way to choose marker and feature types with exclusion and inclusion params
+    df = df[df['Feature Type'] != 'heritable phenotypic marker']
     # transform Chr column into "chr1" format and sort by Chr
     df["chrom"] = df["Chr"].apply(lambda x: f"chr{x}")
     
@@ -192,82 +180,476 @@ def matplot_volcano(ax, df, pval, pval_thresh, lfc_thresh, case, control, title=
         # ax.axvline(lfc_thresh, color="grey", linestyle="--")
     ax.axhline(-np.log10(pval_thresh), color="grey", linestyle="--")
     ax.legend()
-    
+
+def edit_tracks_config(track_file):
+    # TODO: figure out the final version of the tracks.ini file that I need to make it look good
+    """
+        sometimes the variables are commented
+        sometimes they need to be uncommented and changed
+        or just changed
+        this will do all of that
+    """
+    # why comment out parts if you give it a true or false? just make it false...
+    # or just make this into JSON and use that. It's way better for a config file.
+    # might want to make an issue on the github repo to change this?
+
+    vars_to_change = {
+        # 'title': None,  # make it shorter
+        'labels': 'labels = true',  # change to true
+        # 'style': 'UCSC',  # uncomment
+        'all_labels_inside': 'all_labels_inside = true',  # uncomment to true
+        'labels_in_margin': 'labels_in_margin = true',  # uncomment to true
+        # 'merge_transcripts': 'true',  # uncomment to true
+        # 'merge_overlapping_exons': 'true',  # uncomment to true
+        }
+
+    with open(track_file) as f:
+        lines = f.readlines()
+
+    header = None
+    out_lines = []
+    for line in lines:
+        # remove leading and trailing white space 
+        line_clean = line.strip()
+        new_line = line_clean
+        
+        # skip empty lines
+        if line_clean == "":
+            out_lines.append(new_line)
+            continue
+        
+        # check if line is a header - this tells us what config we are editing
+        if line_clean[0] == '[':
+            header = line_clean.strip('[').strip(']')
+            
+        # if we are in the annotation configs
+        if (header is not None) and (header[-4:] == '.gtf'):
+            
+            # check if line is a variable
+            if line_clean.find("=") != -1:
+                
+                # get just the variable by removing comments and whitespace
+                curr_var = line_clean.strip('#').split('=')[0].strip()
+                
+                # check if the current variable is in the variables to change dictionary
+                if curr_var in vars_to_change:
+                    
+                    new_line = vars_to_change[curr_var]
+                    
+                    # # for special case of style
+                    # if curr_var == 'style':
+                    #     if line_clean.find("UCSC") != -1:
+                    #         new_line = line_clean.strip('#')
+                    # else:
+                    #     new_line = vars_to_change[curr_var]
+                    
+        # if new_line != line_clean:
+        #     print(new_line, line_clean)
+            
+        out_lines.append(new_line)
+        
+    with open(track_file, 'w') as f:
+        f.write('\n'.join(out_lines))
+
+def edit_pyGV_file_names(pyGV_dir, top_df):
+    for row in top_df.itertuples():
+        file_name = pyGV_dir / f'test_{row.chrom}-{row.CIS_start}-{row.CIS_end}.png'
+        is_annot = 'unannot' if not row.genes else 'annot'
+        new_name = pyGV_dir / f'{row.new_overall_rank:04}-{is_annot}-{row.chrom}-{row.CIS_start}-{row.CIS_end}.png'
+        if not file_name.is_file():
+            print(f"error: file not found {pyGV_dir / file_name}")
+        else:
+            file_name.rename(new_name)
+            
 def main(args):
-    annotation_file = args["annotation"]
-    cis_dir = args["CIS_dir"]
+    cis_dir: Path = args["CIS_dir"]
+    output: Path = args["output"]
+    case_group = args['case']
+    control_group = args['control']
+    annotation_file: Path = args["annotation"]
+
     verbose = args["verbose"]
+    pval_threshold = args['pval_threshold']
+    marker_expander = args['marker_expander']
+    marker_type = args['marker_type']
+    feature_type = args['feature_type']
+    num_cis = 100  # TODO: add to args
+    
 
     # load in files
-    # IS_df = pd.read_csv(cis_dir / "IS.tsv", sep="\t")
+    IS_df = pd.read_csv(cis_dir / "IS.tsv", sep="\t")
     CIS_df = pd.read_csv(cis_dir / "CIS.tsv", sep="\t")
     annot_file_df = pd.read_csv(annotation_file, sep="\t")
+    annot_df = process_annot_file(annot_file_df, marker_type, feature_type, verbose)
 
-    # process results and annotation file
-    data_df = filter_low_read_CIS(CIS_df, verbose)
-    annot_df = process_annot_file(annot_file_df, args['marker_type'], args['feature_type'], verbose)
-    data_df["genes"] = annotate_cis(data_df, annot_df, args['marker_expander'])
+    # process results and annotation fileargs
+    data_df = cast_indexes(CIS_df)
+    # data_df = filter_low_read_CIS(data_df, verbose)
+    data_df["genes"] = annotate_cis(data_df, annot_df, marker_expander)
+    # remove G-protein genes cause...there's a lot?
+    data_df["genes"] = data_df["genes"].apply(lambda x: remove_Gm(x))
     if verbose:
         print(f"number of annotations: {data_df['genes'].apply(lambda x: len(x)).sum()}")
         
-    # multi-test correction with BY
-    data_df["ranksums_BY"] = false_discovery_control(data_df["ranksums"], method="by")
-    data_df["fishers_exact_BY"] = false_discovery_control(data_df["fishers_exact"], method="by")
-    data_df["binomial_BY"] = false_discovery_control(data_df["binomial"], method="by")
+    # multi-test correction with Benjaminini-Yekutieli method and the -log10 transformation
+    data_df["ranksums-neglog"] = -np.log10(data_df["ranksums"])
+    data_df["fishers_exact-neglog"] = -np.log10(data_df["fishers_exact"])
+    data_df["binomial-neglog"] = -np.log10(data_df["binomial"])
 
-    # rank CIS
-    data_df["ranksums_ranked"] = data_df["ranksums"].rank()
-    data_df["fishers_exact_ranked"] = data_df["fishers_exact"].rank()
-    data_df["total_num_samples_ranked"] = data_df["total_num_samples"].rank(ascending=False)
-    data_df["overall_rank"] = (data_df["ranksums_ranked"] + data_df["fishers_exact_ranked"] + data_df["total_num_samples_ranked"]).rank()
-    data_df = data_df.sort_values("overall_rank")
+    data_df["ranksums-BY"] = false_discovery_control(data_df["ranksums"], method="by")
+    data_df["fishers_exact-BY"] = false_discovery_control(data_df["fishers_exact"], method="by")
+    data_df["binomial-BY"] = false_discovery_control(data_df["binomial"], method="by")
 
-    # get candidate annotation list
-    data_df["CIS_start"] = data_df[["case_pos_min", "case_pos_max", "control_pos_min", "control_pos_max"]].min(axis=1)
-    data_df["CIS_end"] = data_df[["case_pos_min", "case_pos_max", "control_pos_min", "control_pos_max"]].max(axis=1)
-    data_df["genome_viewer"] = data_df.apply(lambda x: f"""{x["chrom"]}:{x["CIS_start"]}-{x["CIS_end"]}""", axis=1)
-    data_df.to_csv(args["output"] / "CIS.tsv", sep="\t", index=False)
+    data_df["ranksums-BY-neglog"] = -np.log10(data_df["ranksums-BY"])
+    data_df["fishers_exact-BY-neglog"] = -np.log10(data_df["fishers_exact-BY"])
+    data_df["binomial-BY-neglog"] = -np.log10(data_df["binomial-BY"])
+
+    # rank CIS by rank aggregation
+    rankers = data_df[['ranksums-neglog', 'fishers_exact-neglog', 'total_read_count', 'total_num_samples']]
+    data_df['rank'] = rk.rank(rk.borda(rankers, method='median'), reverse=True)        
         
-    # remove G-protein genes cause...there's a lot?
-    cols = ["overall_rank", "chrom", "CIS_start", "CIS_end", "genes", "ranksums", "fishers_exact", 
-            "total_num_samples", "case_num_samples", "control_num_samples", "case", "control", "genome_viewer"]
-    data_df["genes"] = data_df["genes"].apply(lambda x: remove_Gm(x))
-    candidate_genes = data_df[cols].explode("genes").reset_index(drop=True)
-    candidate_genes.to_csv(args["output"] / "candidate_genes.tsv", sep="\t", index=False)
+    # CIS enrichment
+    data_df['enriched'] = ""
+    data_df.loc[data_df[(data_df['LFC'] < 0)].index, 'enriched'] = case_group
+    data_df.loc[data_df[(data_df['LFC'] > 0)].index, 'enriched'] = control_group
 
-    # take top genes/features
-    top_x_genes = []
-    for i, x in enumerate(candidate_genes.itertuples()):
-        if not pd.isna(x.genes):
-            top_x_genes.append(i)
-        if len(top_x_genes) == 200:  # TODO: make another parameter?
-            break
+    # add in genome viewer annotation and save CIS data
+    data_df["CIS_start"] = data_df[["case_pos_min", "case_pos_max", "control_pos_min", "control_pos_max"]].min(axis=1).astype(int)
+    data_df["CIS_end"] = data_df[["case_pos_min", "case_pos_max", "control_pos_min", "control_pos_max"]].max(axis=1).astype(int)
+    data_df["genome_viewer"] = data_df.apply(lambda x: f"""{x["chrom"]}:{x["CIS_start"] - marker_expander}-{x["CIS_end"] + marker_expander}""", axis=1)
+    data_df.to_csv(output / "CIS.tsv", sep="\t", index=False)
 
-    top_genes_df = candidate_genes.iloc[top_x_genes]
-    top_genes_df["genes"].to_csv(args["output"] / "top_genes.tsv", sep="\t", index=False, header=False)
-    
+
     # 4 volcano plots (ranksum, fisher exact, both corrected and uncorrected)
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 12))
-    matplot_volcano(ax1, data_df, "ranksums", 0.05, 0, args["case"], args["control"], title="ranksum uncorrected")
-    matplot_volcano(ax2, data_df, "ranksums_BY", 0.05, 0, args["case"], args["control"], title="ranksum corrected")
-    matplot_volcano(ax3, data_df, "fishers_exact", 0.05, 0, args["case"], args["control"], title="fishers_exact uncorrected")
-    matplot_volcano(ax4, data_df, "fishers_exact_BY", 0.05, 0, args["case"], args["control"], title="fishers_exact corrected")
-    plt.savefig(args["output"] /"volcano_plots.svg")
+    matplot_volcano(ax1, data_df, "ranksums", pval_threshold, 0, args["case"], args["control"], title="Rank-sum uncorrected")
+    matplot_volcano(ax2, data_df, "ranksums-BY", pval_threshold, 0, args["case"], args["control"], title="Rank-sum corrected")
+    matplot_volcano(ax3, data_df, "fishers_exact", pval_threshold, 0, args["case"], args["control"], title="Fishers exact uncorrected")
+    matplot_volcano(ax4, data_df, "fishers_exact-BY", pval_threshold, 0, args["case"], args["control"], title="Fishers exact corrected")
+    ax2.set_ylim(ax1.get_ylim())
+    ax4.set_ylim(ax3.get_ylim())
+    fig.savefig(output /"volcano_plots.pdf")
+    fig.savefig(output /"volcano_plots.svg")
+    fig.savefig(output /"volcano_plots.png")
+
+
+
+
+    ######## pyGenomeViewer genomic tracks
     
+    # TODO: use this for pyGenomeViewer?
     # genome tracks: convert MGI .rpt file to .bed file
-    annot_df["strand"] = annot_df["strand"].fillna(".")
     # BED
     bed_df = pd.DataFrame(annot_df["chrom"])
     bed_df["chromStart"] = annot_df["genome coordinate start"]-1
     bed_df["chromEnd"] = annot_df["genome coordinate end"]
     bed_df["name"] = annot_df["Marker Symbol"]
     bed_df["score"] = 1000
-    bed_df["strand"] = annot_df["strand"]
+    bed_df["strand"] = annot_df["strand"].fillna(".")
     # bed_df["thickStart"] = annot_df["genome coordinate start"]-1
     # bed_df["thickEnd"] = annot_df["genome coordinate end"]
     # bed_df["itemRGB"] = "255,255,255"
-    bed_df.to_csv(args["output"] / "MRK_List2.bed", sep="\t", index=False, header=False)
-    
+    bed_df.to_csv(output/ "MRK_List2.bed", sep="\t", index=False, header=False)
+    # TODO: move back into 2020_SB output directory?
+
+
+
+    # TODO: the number of insertions isn't shown, just the insertion site. How should I portray this?
+    # make bed file for each region to plot in pyGenomeViewer for candidate genes and for top CIS
+    top_CIS_bed_file = output / "top_CIS-pyGV.bed"
+    top_CIS = data_df.sort_values('rank').iloc[:num_cis].copy()
+    top_CIS["CIS_start"] = top_CIS["CIS_start"] - marker_expander
+    top_CIS["CIS_end"] = top_CIS["CIS_end"] + marker_expander
+
+    top_CIS_bed = pd.DataFrame(top_CIS["chrom"])
+    top_CIS_bed["chromStart"] = top_CIS["CIS_start"]
+    top_CIS_bed["chromEnd"] = top_CIS["CIS_end"]
+    top_CIS_bed["name"] = top_CIS['genes'].apply(lambda x: "_".join(x))  # TODO: change this to CPM?
+    top_CIS_bed["score"] = 1000
+    top_CIS_bed["strand"] = "."  # TODO: add strand specificity?
+    top_CIS_bed.to_csv(top_CIS_bed_file, sep="\t", index=False, header=False)
+
+    # prepare directories for pyGenomeViewer results
+    pyGV_CIS = output / "pyGV_top_CIS"
+    pyGV_CIS.mkdir(exist_ok=True, parents=True)
+
+    # get bed files programatically - file annotation.gtf.gz should be in the same high level result directory
+    # TODO: maybe make a bed file from the rpt file and use that? Or do they supply one already?
+    bed_files_list = []
+    for file in output.parent.parent.iterdir():
+        if file.is_file():
+            bed_files_list.append(str(file))
+            
+    bed_files_list = [
+        'output/2020_SB/LT.bed',
+        'output/2020_SB/RT.bed',
+        'output/2020_SB/S.bed',
+        'output/2020_SB/MRK_List2.bed',
+        # 'output/2020_SB/gencode.vM35.annotation.gtf.gz',
+        ]
+    track_files = " ".join(bed_files_list)
+
+    track_out = output / "tracks.ini"
+
+    # TODO: need a better way to make the tracks config file
+    # print("make genome track config file")
+    # os.system(f"make_tracks_file --trackFiles {track_files} -o {track_out} > /dev/null")
+
+    # print("edit config file")
+    # edit_tracks_config(track_out)
+
+
+    # make genomic track images
+    print('make genome track plots')
+    os.system(f"pyGenomeTracks --tracks {track_out} --BED {top_CIS_bed_file} --outFileName {pyGV_CIS / 'test.png'} > /dev/null 2>&1")
+    # run2 = f"pyGenomeTracks --tracks {track_out} --BED {top_genes_bed_file} --outFileName {pyGV_genes / 'test.png'} > /dev/null 2>&1"
+    # run3 = f"pyGenomeTracks --tracks {track_out} --BED {top_unannot_bed_file} --outFileName {pyGV_unannot / 'test.png'} > /dev/null 2>&1"
+    # processes = [ subprocess.Popen(program, shell=True) for program in [run1, run2, run3] ]
+    # for process in processes:
+    #     process.wait()
+
+
+    # go through png files and rename to relative ranks or genes
+    print('editing genome track file names')
+    edit_pyGV_file_names(pyGV_CIS, top_CIS)
+
+
+
+
+
+
+    ######## Gene-set enrichment
+    # select the union of sig. rank sum and fisher exact results for our candidates
+    # candidate_df = data_df[(data_df['ranksums'] < 0.05)]
+    # candidate_df = data_df[(data_df['fishers_exact'] < 0.05)]
+    candidate_df = data_df[(data_df['ranksums'] < pval_threshold) | (data_df['fishers_exact'] < pval_threshold)]
+    gene_df1 = candidate_df.explode("genes").reset_index(drop=True).copy(deep=True)
+    gene_df2 = gene_df1[~gene_df1['genes'].isna()]
+    candidate_genes = set(gene_df2['genes'].to_list())
+    print(len(candidate_df))
+    print(len(candidate_genes))
+    # adding in the fisher's exact adds 4 new genes (1008 to 1012), but one of them is the experimentally validated Sprr1b
+
+
+    ##### enrichr #####
+    import gseapy as gp
+    # over-representation analysis using hypergeometric test
+    # gp.enrich is local while gp.enrichr is using Enrichr web services
+
+
+    background_gene_list = data_df['genes'].explode().dropna().unique().tolist()
+    print(f"background gene count: {len(background_gene_list)}")
+
+    # TODO: download MSigDB gmt files for analysis
+    # read gmt file
+    # gene_set = str(output.parent / 'msigdb.v2023.2.Mm.symbols.gmt')
+    # gene_set = str(output.parent / 'm2.all.v2023.2.Mm.symbols.gmt')
+    # gene_set = str(output.parent / 'm2.cp.v2023.2.Mm.symbols.gmt')
+    gene_set = str(output.parent / 'm5.all.v2023.2.Mm.symbols.gmt')
+    # gene_set = str(output.parent / 'm5.go.v2023.2.Mm.symbols.gmt')
+
+    gene_set_df = pd.read_csv(gene_set, header=None)
+    gene_set_df = gene_set_df[0].str.split('\t', expand=True, n=2)
+    gene_set_df.columns = ['pathway', "url", "genes"]
+    gene_set_df['genes'] = gene_set_df['genes'].str.split('\t')
+    gene_set_df['size'] = gene_set_df['genes'].apply(len)
+
+    gene_set_list = { x.pathway: x.genes for x in gene_set_df.drop('size', axis=1).itertuples() }
+    print(f"gene-set count: {len(gene_set_list)}")
+
+    min_genes = 10
+    max_genes = 300
+    filtered_gene_set_df = gene_set_df[(gene_set_df['size'] >= min_genes) & (gene_set_df['size'] <= max_genes)]
+    filtered_gene_set_list = { x.pathway: x.genes for x in filtered_gene_set_df.drop('size', axis=1).itertuples() }
+    print(f"filtered gene-set count: {len(filtered_gene_set_list)}")
+
+
+
+
+    # remove redundant pathways with jaccard distance (dissimilarity) < 0.5
+    # the more similar two arrays are the closer to 0 they will be
+    # the more distant they are then the closer to 1 they will be
+
+    def get_dist(m, i, j):
+        # The metric dist(u=X[i], v=X[j]) is computed and stored in a condensed array whose entry is i < j < m
+        # see scipy documentation for pdist for more info
+        return m * i + j - ((i + 2) * (i + 1)) // 2
+
+    sim_thres = 0.5
+
+    # make dataframe for gene-set data
+    list_genes = sorted(filtered_gene_set_df.explode('genes')['genes'].unique())
+    list_pathways = filtered_gene_set_df['pathway'].unique()
+    empty_arr = np.zeros((len(list_pathways), len(list_genes)))
+    p_g_df = pd.DataFrame(data=empty_arr, index=list_pathways, columns=list_genes)
+
+    # add gene-set data
+    for row in filtered_gene_set_df.itertuples():
+        p_g_df.loc[row.pathway, row.genes] = 1
+
+    # append pathway index if it is the first pathway found to be more similar than the threshold 0.5
+    dm2 = pairwise_distances(p_g_df.astype(bool).to_numpy(), metric='jaccard', n_jobs=-1)
+    dm = squareform(dm2)
+    m = dm2.shape[0]
+    removes = []
+    for i in range(m):
+        for j in range(1, m):
+            if i < j:
+                ind = get_dist(m, i, j)
+                if dm[ind] < sim_thres:
+                    removes.append((j))
+                    
+    # remove redundant pathways
+    remove_rows = p_g_df.index.values[list(set(removes))]
+    final_gene_set_df = filtered_gene_set_df[~filtered_gene_set_df['pathway'].isin(remove_rows)]
+    final_gene_set_list = { x.pathway: x.genes for x in final_gene_set_df.drop('size', axis=1).itertuples() }
+    print(f"final gene-set count: {len(final_gene_set_list)}")
+
+    lt_candidate_df = candidate_df[candidate_df['enriched'] == 'LT']
+    gene_df1 = lt_candidate_df.explode("genes").reset_index(drop=True).copy(deep=True)
+    gene_df2 = gene_df1[~gene_df1['genes'].isna()]
+    lt_candidate_genes = set(gene_df2['genes'].to_list())
+    print(len(lt_candidate_genes))
+
+    enr_lt = gp.enrich(
+        gene_list=list(lt_candidate_genes),
+        gene_sets=final_gene_set_list,
+        background=background_gene_list,
+        outdir=None,
+        verbose=1,
+        )
+    enr_lt.results.sort_values(['Adjusted P-value', 'P-value']).head(20)
+
+
+    # enr.results.Term = enr.results.Term.str.split(" \(GO").str[0]
+
+    ax = gp.dotplot(enr_lt.results,
+                    column="P-value",  # TODO: can't use "Adjusted P-value"
+                    size=6,
+                    top_term=10,
+                    figsize=(6,8),
+                    title = "Enrichement: LT",
+                    cmap="viridis_r"
+                    )
+    plt.show()
+
+    import networkx as nx
+
+    # build graph
+    nodes, edges = gp.enrichment_map(enr_lt.results,
+                                    column="P-value",  # TODO: can't use "Adjusted P-value"
+                                    top_term=20,
+                                    )
+    G = nx.from_pandas_edgelist(edges, source='src_idx', target='targ_idx', edge_attr=['jaccard_coef', 'overlap_coef', 'overlap_genes'])
+
+    # Add missing node if there is any
+    for node in nodes.index:
+        if node not in G.nodes():
+            G.add_node(node)
+            
+            
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+
+    # init node cooridnates
+    # pos=nx.layout.shell_layout(G)
+    pos=nx.layout.kamada_kawai_layout(G)
+
+    # draw nodes
+    node_size = list(nodes.Hits_ratio * 1000)
+    node_color = list(nodes['P-value'])
+    nx.draw_networkx_nodes(G, pos=pos, cmap='RdYlBu', node_color=node_color, node_size=node_size)
+
+    # draw node labels
+    labels = nodes.Term.to_dict()
+    nx.draw_networkx_labels(G, pos=pos, labels=labels, font_size=8)
+
+    # draw edges
+    edge_weight = nx.get_edge_attributes(G, 'jaccard_coef').values()
+    width = list(map(lambda x: x*10, edge_weight))
+    nx.draw_networkx_edges(G, pos=pos, width=width, edge_color='#CDDBD4')
+
+    plt.show()
+
+
+    # save to GraphML format and upload to Cytoscape
+    nx.write_graphml(G, 'path')
+
+
+
+
+    s_candidate_df = candidate_df[candidate_df['enriched'] == 'S']
+
+    gene_df1 = s_candidate_df.explode("genes").reset_index(drop=True).copy(deep=True)
+    gene_df2 = gene_df1[~gene_df1['genes'].isna()]
+    s_candidate_genes = set(gene_df2['genes'].to_list())
+    print(len(s_candidate_genes))
+
+    enr_s = gp.enrich(
+        gene_list=list(s_candidate_genes),
+        gene_sets=final_gene_set_list,  # filtered_gene_set_list gene_set_list
+        background=background_gene_list,
+        outdir=None,
+        verbose=1,
+        )
+    enr_s.results.sort_values(['Adjusted P-value', 'P-value']).head(20)
+
+
+    # enr.results.Term = enr.results.Term.str.split(" \(GO").str[0]
+
+    ax = gp.dotplot(enr_s.results,
+                    column="P-value",  # TODO: can't use "Adjusted P-value"
+                    size=6,
+                    top_term=10,
+                    figsize=(6,8),
+                    title = "Enrichement: S",
+                    cmap="viridis_r"
+                    )
+    plt.show()
+
+    import networkx as nx
+
+    # build graph
+    nodes, edges = gp.enrichment_map(enr_s.results,
+                                    column="P-value",  # TODO: can't use "Adjusted P-value"
+                                    top_term=20,
+                                    )
+    G = nx.from_pandas_edgelist(edges, source='src_idx', target='targ_idx', edge_attr=['jaccard_coef', 'overlap_coef', 'overlap_genes'])
+
+    # Add missing node if there is any
+    for node in nodes.index:
+        if node not in G.nodes():
+            G.add_node(node)
+            
+            
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+
+    # init node cooridnates
+    # pos=nx.layout.shell_layout(G)
+    pos=nx.layout.kamada_kawai_layout(G)
+
+    # draw nodes
+    node_size = list(nodes.Hits_ratio * 1000)
+    node_color = list(nodes['P-value'])
+    nx.draw_networkx_nodes(G, pos=pos, cmap='RdYlBu', node_color=node_color, node_size=node_size)
+
+    # draw node labels
+    labels = nodes.Term.to_dict()
+    nx.draw_networkx_labels(G, pos=pos, labels=labels, font_size=8)
+
+    # draw edges
+    edge_weight = nx.get_edge_attributes(G, 'jaccard_coef').values()
+    width = list(map(lambda x: x*10, edge_weight))
+    nx.draw_networkx_edges(G, pos=pos, width=width, edge_color='#CDDBD4')
+
+    plt.show()
+
+
+    # save to GraphML format and upload to Cytoscape
+    nx.write_graphml(G, 'path')
+
+
 
 if __name__ == "__main__":
     main(load_args())
