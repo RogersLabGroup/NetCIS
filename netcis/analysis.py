@@ -1,4 +1,4 @@
-import ast, os
+import ast, os, pickle
 from pathlib import Path
 
 from docopt import docopt
@@ -8,54 +8,62 @@ from scipy.stats import false_discovery_control
 from scipy.spatial.distance import squareform
 from sklearn.metrics.pairwise import pairwise_distances
 import ranky as rk
+import networkx as nx
+import gseapy as gp
 
 import matplotlib.pyplot as plt
 import seaborn.objects as so
 from seaborn import axes_style, plotting_context
 
-# pyright: reportArgumentType=false
+
 
 def load_args() -> dict:
     doc = """
     Analyze the CIS results with multiple test corrections, genomic annotations, and plots
 
     Usage:
-        analysis.py --output_prefix DIR --case STR --control STR --annotation FILE [options]
+        analysis.py --output_prefix DIR --case STR --control STR --annotation FILE --gene_sets FILE [options]
 
      -o, --output_prefix=DIR            a prefix of the output directory that will have "-analysis" appended to it
      -a, --case=STR                     treatment type value to use as case
      -b, --control=STR                  treatment type value to use as control
      -g, --annotation=FILE              MGI's mouse menetic markers excluding withdrawn genes
+     -s, --gene_sets=FILE               Pathway gene sets as a gmt file
 
     Options:
      -h, --help                         show this help message and exit
      -v, --verbose=N                    print more verbose information if available using 0, 1 or 2 [default: 0]
-     -p, --pval_threshold=N             p-value to exclude pCIS for significance [default: 0.05]
-     -x, --marker_expander=N            number of base pairs to extend the boundaries of genomic annotations [default: 5000]
+     -p, --pval_threshold=N             a float p-value to exclude pCIS for significance [default: 0.05]
+     -x, --marker_expander=N            an integer number of base pairs to extend the boundaries of genomic annotations [default: 5000]
      -m, --marker_type=STR              marker type to annotate based on MRK_List2.rpt file. An empty string "" will not do any filtering [default: Gene]
      -f, --feature_type=STR             marker feature type to annotate based on MRK_List2.rpt file. An empty string "" will not do any filtering [default: protein coding gene]
+     -n, --num_cis=N                    and integer number of top ranked CIS to create genome viewer plots for. [default: 20]
+     -j, --sim_thresh=N                 theshold for the Jaccard distance used in removing redundant pathways for gene set enrichment [default: 0.5]
     """
-
+    # TODO: download gene sets MSigDB gmt files for analysis. Prepare this in the input directory
+    
     # remove "--" from args
     args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
         
-    int_opts = ["marker_expander", "verbose"]
+    int_opts = ["marker_expander", "verbose", 'num_cis']
     for opts in int_opts:
         args[opts] = int(args[opts])
-        
+    
+    float_opts = ["pval_threshold", "sim_thresh"]
+    for opts in float_opts:
+        args[opts] = float(args[opts])
+    
     if args["verbose"] > 1:
         print("Arguements given")
         for key, item in args.items():
             print(f"\t{key}: {item}")
         print("\n")
-    
-    args["pval_threshold"] = float(args["pval_threshold"])
-    
+        
     args["CIS_dir"] = Path(args["output_prefix"] + "-CIS") / f"{args['case']}-{args['control']}"
     args["annotation"] = Path(args["annotation"])
     args["output"] = Path(args["output_prefix"] + "-analysis") / f"{args['case']}-{args['control']}"
     args["output"].mkdir(exist_ok=True, parents=True)
-
+    
     return args
 
 def cast_indexes(df):
@@ -181,6 +189,186 @@ def matplot_volcano(ax, df, pval, pval_thresh, lfc_thresh, case, control, title=
     ax.axhline(-np.log10(pval_thresh), color="grey", linestyle="--")
     ax.legend()
 
+def plot_volcanoes(data_df, pval_threshold, case_group, control_group, output):
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 12))
+    matplot_volcano(ax1, data_df, "ranksums", pval_threshold, 0, case_group, control_group, title="Rank-sum uncorrected")
+    matplot_volcano(ax2, data_df, "ranksums-BY", pval_threshold, 0, case_group, control_group, title="Rank-sum corrected")
+    matplot_volcano(ax3, data_df, "fishers_exact", pval_threshold, 0, case_group, control_group, title="Fishers exact uncorrected")
+    matplot_volcano(ax4, data_df, "fishers_exact-BY", pval_threshold, 0, case_group, control_group, title="Fishers exact corrected")
+    ax2.set_ylim(ax1.get_ylim())
+    ax4.set_ylim(ax3.get_ylim())
+    fig.savefig(output /"volcano_plots.pdf")
+    fig.savefig(output /"volcano_plots.svg")
+    fig.savefig(output /"volcano_plots.png")
+    plt.close()
+    
+def get_dist(m, i, j):
+    # The metric dist(u=X[i], v=X[j]) is computed and stored in a condensed array whose entry is i < j < m
+    # see scipy documentation for pdist for more info
+    return m * i + j - ((i + 2) * (i + 1)) // 2
+
+def prepare_gene_set(gene_set_file, gene_set_output, sim_thres, verbose):
+    
+    # it can be time consuming removing redundant pathways so if the gene sets are already made then skip this step
+    if (gene_set_output / 'final_gene_sets.pkl').is_file():
+        with open(gene_set_output / 'gene_sets.pkl', 'rb') as file1: 
+            gene_sets = pickle.load(file1)
+        with open(gene_set_output / 'filtered_gene_sets.pkl', 'rb') as file2: 
+            filtered_gene_sets = pickle.load(file2)
+        with open(gene_set_output / 'final_gene_sets.pkl', 'rb') as file3: 
+            final_gene_sets = pickle.load(file3)
+        if verbose:
+            print(f"gene-set count: {len(gene_sets)}")
+            print(f"filtered gene-set count: {len(filtered_gene_sets)}")
+            print(f"final gene-set count: {len(final_gene_sets)}")
+        return gene_sets, filtered_gene_sets, final_gene_sets
+        
+        
+    # read gmt file
+    gene_set_df = pd.read_csv(gene_set_file, header=None)
+    gene_set_df = gene_set_df[0].str.split('\t', expand=True, n=2)
+    gene_set_df.columns = ['pathway', "url", "genes"]
+    gene_set_df['genes'] = gene_set_df['genes'].str.split('\t')
+    gene_set_df['size'] = gene_set_df['genes'].apply(len)
+    gene_sets = { x.pathway: x.genes for x in gene_set_df.drop('size', axis=1).itertuples() }
+    if verbose:
+        print(f"gene-set count: {len(gene_sets)}")
+    
+    
+    # filter pathway list by size of pathway
+    min_genes = 10
+    max_genes = 300
+    filtered_gene_set_df = gene_set_df[(gene_set_df['size'] >= min_genes) & (gene_set_df['size'] <= max_genes)]
+    filtered_gene_sets = { x.pathway: x.genes for x in filtered_gene_set_df.drop('size', axis=1).itertuples() }
+    if verbose:
+        print(f"filtered gene-set count: {len(filtered_gene_sets)}")
+
+
+
+
+    # remove redundant pathways with jaccard distance (dissimilarity) < 0.5
+    # the more similar two arrays are the closer to 0 they will be
+    # the more distant they are then the closer to 1 they will be
+
+
+    # make dataframe for gene-set data
+    list_genes = sorted(filtered_gene_set_df.explode('genes')['genes'].unique())
+    list_pathways = filtered_gene_set_df['pathway'].unique()
+    empty_arr = np.zeros((len(list_pathways), len(list_genes)))
+    p_g_df = pd.DataFrame(data=empty_arr, index=list_pathways, columns=list_genes)
+
+    # add gene-set data
+    for row in filtered_gene_set_df.itertuples():
+        p_g_df.loc[row.pathway, row.genes] = 1
+
+    if verbose:
+        print('Beginning to remove redundant pathways. This may take a while...', end='')
+    # append pathway index if it is the first pathway found to be more similar than the threshold 0.5
+    dm2 = pairwise_distances(p_g_df.astype(bool).to_numpy(), metric='jaccard', n_jobs=-1)
+    dm = squareform(dm2)
+    m = dm2.shape[0]
+    removes = []
+    for i in range(m):
+        for j in range(1, m):
+            if i < j:
+                ind = get_dist(m, i, j)
+                if dm[ind] < sim_thres:
+                    removes.append((j))
+    if verbose:
+        print('done')
+        
+    # remove redundant pathways
+    remove_rows = p_g_df.index.values[list(set(removes))]
+    final_gene_set_df = filtered_gene_set_df[~filtered_gene_set_df['pathway'].isin(remove_rows)]
+    final_gene_sets = { x.pathway: x.genes for x in final_gene_set_df.drop('size', axis=1).itertuples() }
+    if verbose:
+        print(f"final gene-set count: {len(final_gene_sets)}")
+    
+    with open(gene_set_output / 'gene_sets.pkl', 'wb') as file1: 
+        pickle.dump(gene_sets, file1)
+    with open(gene_set_output / 'filtered_gene_sets.pkl', 'wb') as file2: 
+        pickle.dump(filtered_gene_sets, file2)
+    with open(gene_set_output / 'final_gene_sets.pkl', 'wb') as file3: 
+        pickle.dump(final_gene_sets, file3)
+        
+    return gene_sets, filtered_gene_sets, final_gene_sets
+
+
+def run_gse(candidate_df, treatment, gene_sets, background, output, verbose):
+    
+    enriched_df = candidate_df[candidate_df['enriched'] == treatment]
+    gene_df1 = enriched_df.explode("genes").reset_index(drop=True).copy(deep=True)
+    gene_df2 = gene_df1[~gene_df1['genes'].isna()]
+    enriched_genes = set(gene_df2['genes'].to_list())
+    gene_list = list(enriched_genes)
+    print(f"number of enriched genes in {treatment}: {len(enriched_genes)}")
+    
+    enrichment = gp.enrich(gene_list=gene_list, gene_sets=gene_sets, background=background, outdir=None)
+    
+    res_df : pd.DataFrame = enrichment.results.sort_values(['Adjusted P-value', 'P-value'])
+    res_df.to_csv(output / f"enrichr-results-{treatment}.tsv", sep='\t')
+    
+    # dot plot
+    # TODO: can't use "Adjusted P-value" cause none are significant
+    ax_dot = gp.dotplot(res_df, column="P-value", size=6, top_term=10, figsize=(6,8), title = f"Enrichement: {treatment}", cmap="viridis_r")
+    # plt.tight_layout()
+    plt.savefig(output / f"enrichr-dotplot-{treatment}.png")
+    plt.savefig(output / f"enrichr-dotplot-{treatment}.pdf")
+    plt.savefig(output / f"enrichr-dotplot-{treatment}.svg")
+    plt.close()
+        
+        
+        
+    # build graph
+    # TODO: can't use "Adjusted P-value" cause none are significant
+    nodes, edges = gp.enrichment_map(res_df, column="P-value", top_term=20)
+    G = nx.from_pandas_edgelist(edges, source='src_idx', target='targ_idx', edge_attr=['jaccard_coef', 'overlap_coef', 'overlap_genes'])
+
+    # Add missing node if there is any
+    for node in nodes.index:
+        if node not in G.nodes():
+            G.add_node(node)
+            
+    fig, ax_graph = plt.subplots(figsize=(8, 8))
+
+    # init node cooridnates
+    # pos=nx.layout.shell_layout(G)
+    pos=nx.layout.kamada_kawai_layout(G)
+
+    # draw nodes
+    node_size = list(nodes.Hits_ratio*1000)
+    node_color = list(nodes['P-value'])
+    net_nodes = nx.draw_networkx_nodes(G, pos=pos, cmap='RdYlBu', node_color=node_color, node_size=node_size, ax=ax_graph)
+    # make legends
+    legend1 = ax_graph.legend(
+        *net_nodes.legend_elements("sizes", num=4),
+        loc="upper right",
+        title="Hits ratio\n* 1000",
+        bbox_to_anchor=(1.16, 1),
+        borderpad=1,
+        labelspacing=2.5,
+        )
+    ax_graph.add_artist(legend1)
+    legend2 = ax_graph.legend(*net_nodes.legend_elements("colors"), loc="lower right", title="P-value", bbox_to_anchor=(1.15, 0))
+
+    # draw node labels
+    labels = nodes.Term.to_dict()
+    nx.draw_networkx_labels(G, pos=pos, labels=labels, font_size=8, ax=ax_graph)
+
+    # draw edges
+    edge_weight = nx.get_edge_attributes(G, 'jaccard_coef').values()
+    width = list(map(lambda x: x*10, edge_weight))
+    nx.draw_networkx_edges(G, pos=pos, width=width, edge_color='#CDDBD4', ax=ax_graph)
+    plt.tight_layout()
+    
+    fig.savefig(output / f"enrichr-netowrk-{treatment}.png")
+    fig.savefig(output / f"enrichr-netowrk-{treatment}.pdf")
+    fig.savefig(output / f"enrichr-netowrk-{treatment}.svg")
+    plt.close()
+    
+    # save to GraphML format if someone wants to use Cytoscape
+    nx.write_graphml(G, output / f'{treatment}.graphml')
+
 def edit_tracks_config(track_file):
     # TODO: figure out the final version of the tracks.ini file that I need to make it look good
     """
@@ -255,25 +443,28 @@ def edit_pyGV_file_names(pyGV_dir, top_df):
     for row in top_df.itertuples():
         file_name = pyGV_dir / f'test_{row.chrom}-{row.CIS_start}-{row.CIS_end}.png'
         is_annot = 'unannot' if not row.genes else 'annot'
-        new_name = pyGV_dir / f'{row.new_overall_rank:04}-{is_annot}-{row.chrom}-{row.CIS_start}-{row.CIS_end}.png'
+        new_name = pyGV_dir / f'{row.rank:03}-{is_annot}-{row.chrom}-{row.CIS_start}-{row.CIS_end}.png'
         if not file_name.is_file():
             print(f"error: file not found {pyGV_dir / file_name}")
         else:
             file_name.rename(new_name)
-            
+
+
 def main(args):
     cis_dir: Path = args["CIS_dir"]
     output: Path = args["output"]
     case_group = args['case']
     control_group = args['control']
     annotation_file: Path = args["annotation"]
+    gene_set_file = args['gene_sets']
 
     verbose = args["verbose"]
     pval_threshold = args['pval_threshold']
     marker_expander = args['marker_expander']
     marker_type = args['marker_type']
     feature_type = args['feature_type']
-    num_cis = 100  # TODO: add to args
+    num_cis = args['num_cis']
+    sim_thresh = args['sim_thresh']
     
 
     # load in files
@@ -320,17 +511,49 @@ def main(args):
     data_df.to_csv(output / "CIS.tsv", sep="\t", index=False)
 
 
+
+    ### make plots for analysis of results
+    
     # 4 volcano plots (ranksum, fisher exact, both corrected and uncorrected)
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 12))
-    matplot_volcano(ax1, data_df, "ranksums", pval_threshold, 0, args["case"], args["control"], title="Rank-sum uncorrected")
-    matplot_volcano(ax2, data_df, "ranksums-BY", pval_threshold, 0, args["case"], args["control"], title="Rank-sum corrected")
-    matplot_volcano(ax3, data_df, "fishers_exact", pval_threshold, 0, args["case"], args["control"], title="Fishers exact uncorrected")
-    matplot_volcano(ax4, data_df, "fishers_exact-BY", pval_threshold, 0, args["case"], args["control"], title="Fishers exact corrected")
-    ax2.set_ylim(ax1.get_ylim())
-    ax4.set_ylim(ax3.get_ylim())
-    fig.savefig(output /"volcano_plots.pdf")
-    fig.savefig(output /"volcano_plots.svg")
-    fig.savefig(output /"volcano_plots.png")
+    volcano_output = output / "volcano_plots"
+    volcano_output.mkdir(exist_ok=True, parents=True)
+    plot_volcanoes(data_df, pval_threshold, case_group, control_group, volcano_output)
+    
+
+    # Gene-set enrichment
+    # candidate CIS: select the union of sig. rank sum and fisher exact results for our candidates
+    candidate_df = data_df[(data_df['ranksums'] < pval_threshold) | (data_df['fishers_exact'] < pval_threshold)].copy(deep=True)
+    if verbose:
+        print(f"number of candidate CIS: {len(candidate_df)}")
+
+    # candidate genes
+    gene_df1 = candidate_df.explode("genes", ignore_index=True)
+    gene_df2 = gene_df1[~gene_df1['genes'].isna()]
+    candidate_genes = set(gene_df2['genes'].to_list())
+    if verbose:
+        print(f"number of candidate genes: {len(candidate_genes)}")
+
+    # background gene set
+    background_gene_list = data_df.explode("genes", ignore_index=True)['genes'].dropna().unique().tolist()
+    if verbose:
+        print(f"number of background genes: {len(background_gene_list)}\n")
+
+    # prepare gene sets
+    gene_set_output = output / "processed_gene_sets"
+    gene_set_output.mkdir(exist_ok=True, parents=True)
+    gene_sets, filtered_gene_sets, final_gene_sets = prepare_gene_set(gene_set_file, gene_set_output, sim_thresh, verbose)
+    # NOTE: it is suggested to use the final_gene_sets, as these are pathway that have been filtered for gene size
+    # and redundant pathways removed.
+    
+    # case enrichment
+    case_output = output / f"gene_set_enrichment-{case_group}"
+    case_output.mkdir(exist_ok=True, parents=True)
+    run_gse(candidate_df, case_group, final_gene_sets, background_gene_list, case_output, verbose)
+
+    # control enrichment
+    control_output = output / f"gene_set_enrichment-{control_group}"
+    control_output.mkdir(exist_ok=True, parents=True)
+    run_gse(candidate_df, control_group, final_gene_sets, background_gene_list, control_output, verbose)
 
 
 
@@ -418,236 +641,7 @@ def main(args):
 
 
 
-    ######## Gene-set enrichment
-    # select the union of sig. rank sum and fisher exact results for our candidates
-    # candidate_df = data_df[(data_df['ranksums'] < 0.05)]
-    # candidate_df = data_df[(data_df['fishers_exact'] < 0.05)]
-    candidate_df = data_df[(data_df['ranksums'] < pval_threshold) | (data_df['fishers_exact'] < pval_threshold)]
-    gene_df1 = candidate_df.explode("genes").reset_index(drop=True).copy(deep=True)
-    gene_df2 = gene_df1[~gene_df1['genes'].isna()]
-    candidate_genes = set(gene_df2['genes'].to_list())
-    print(len(candidate_df))
-    print(len(candidate_genes))
-    # adding in the fisher's exact adds 4 new genes (1008 to 1012), but one of them is the experimentally validated Sprr1b
 
-
-    ##### enrichr #####
-    import gseapy as gp
-    # over-representation analysis using hypergeometric test
-    # gp.enrich is local while gp.enrichr is using Enrichr web services
-
-
-    background_gene_list = data_df['genes'].explode().dropna().unique().tolist()
-    print(f"background gene count: {len(background_gene_list)}")
-
-    # TODO: download MSigDB gmt files for analysis
-    # read gmt file
-    # gene_set = str(output.parent / 'msigdb.v2023.2.Mm.symbols.gmt')
-    # gene_set = str(output.parent / 'm2.all.v2023.2.Mm.symbols.gmt')
-    # gene_set = str(output.parent / 'm2.cp.v2023.2.Mm.symbols.gmt')
-    gene_set = str(output.parent / 'm5.all.v2023.2.Mm.symbols.gmt')
-    # gene_set = str(output.parent / 'm5.go.v2023.2.Mm.symbols.gmt')
-
-    gene_set_df = pd.read_csv(gene_set, header=None)
-    gene_set_df = gene_set_df[0].str.split('\t', expand=True, n=2)
-    gene_set_df.columns = ['pathway', "url", "genes"]
-    gene_set_df['genes'] = gene_set_df['genes'].str.split('\t')
-    gene_set_df['size'] = gene_set_df['genes'].apply(len)
-
-    gene_set_list = { x.pathway: x.genes for x in gene_set_df.drop('size', axis=1).itertuples() }
-    print(f"gene-set count: {len(gene_set_list)}")
-
-    min_genes = 10
-    max_genes = 300
-    filtered_gene_set_df = gene_set_df[(gene_set_df['size'] >= min_genes) & (gene_set_df['size'] <= max_genes)]
-    filtered_gene_set_list = { x.pathway: x.genes for x in filtered_gene_set_df.drop('size', axis=1).itertuples() }
-    print(f"filtered gene-set count: {len(filtered_gene_set_list)}")
-
-
-
-
-    # remove redundant pathways with jaccard distance (dissimilarity) < 0.5
-    # the more similar two arrays are the closer to 0 they will be
-    # the more distant they are then the closer to 1 they will be
-
-    def get_dist(m, i, j):
-        # The metric dist(u=X[i], v=X[j]) is computed and stored in a condensed array whose entry is i < j < m
-        # see scipy documentation for pdist for more info
-        return m * i + j - ((i + 2) * (i + 1)) // 2
-
-    sim_thres = 0.5
-
-    # make dataframe for gene-set data
-    list_genes = sorted(filtered_gene_set_df.explode('genes')['genes'].unique())
-    list_pathways = filtered_gene_set_df['pathway'].unique()
-    empty_arr = np.zeros((len(list_pathways), len(list_genes)))
-    p_g_df = pd.DataFrame(data=empty_arr, index=list_pathways, columns=list_genes)
-
-    # add gene-set data
-    for row in filtered_gene_set_df.itertuples():
-        p_g_df.loc[row.pathway, row.genes] = 1
-
-    # append pathway index if it is the first pathway found to be more similar than the threshold 0.5
-    dm2 = pairwise_distances(p_g_df.astype(bool).to_numpy(), metric='jaccard', n_jobs=-1)
-    dm = squareform(dm2)
-    m = dm2.shape[0]
-    removes = []
-    for i in range(m):
-        for j in range(1, m):
-            if i < j:
-                ind = get_dist(m, i, j)
-                if dm[ind] < sim_thres:
-                    removes.append((j))
-                    
-    # remove redundant pathways
-    remove_rows = p_g_df.index.values[list(set(removes))]
-    final_gene_set_df = filtered_gene_set_df[~filtered_gene_set_df['pathway'].isin(remove_rows)]
-    final_gene_set_list = { x.pathway: x.genes for x in final_gene_set_df.drop('size', axis=1).itertuples() }
-    print(f"final gene-set count: {len(final_gene_set_list)}")
-
-    lt_candidate_df = candidate_df[candidate_df['enriched'] == 'LT']
-    gene_df1 = lt_candidate_df.explode("genes").reset_index(drop=True).copy(deep=True)
-    gene_df2 = gene_df1[~gene_df1['genes'].isna()]
-    lt_candidate_genes = set(gene_df2['genes'].to_list())
-    print(len(lt_candidate_genes))
-
-    enr_lt = gp.enrich(
-        gene_list=list(lt_candidate_genes),
-        gene_sets=final_gene_set_list,
-        background=background_gene_list,
-        outdir=None,
-        verbose=1,
-        )
-    enr_lt.results.sort_values(['Adjusted P-value', 'P-value']).head(20)
-
-
-    # enr.results.Term = enr.results.Term.str.split(" \(GO").str[0]
-
-    ax = gp.dotplot(enr_lt.results,
-                    column="P-value",  # TODO: can't use "Adjusted P-value"
-                    size=6,
-                    top_term=10,
-                    figsize=(6,8),
-                    title = "Enrichement: LT",
-                    cmap="viridis_r"
-                    )
-    plt.show()
-
-    import networkx as nx
-
-    # build graph
-    nodes, edges = gp.enrichment_map(enr_lt.results,
-                                    column="P-value",  # TODO: can't use "Adjusted P-value"
-                                    top_term=20,
-                                    )
-    G = nx.from_pandas_edgelist(edges, source='src_idx', target='targ_idx', edge_attr=['jaccard_coef', 'overlap_coef', 'overlap_genes'])
-
-    # Add missing node if there is any
-    for node in nodes.index:
-        if node not in G.nodes():
-            G.add_node(node)
-            
-            
-
-    fig, ax = plt.subplots(figsize=(8, 8))
-
-    # init node cooridnates
-    # pos=nx.layout.shell_layout(G)
-    pos=nx.layout.kamada_kawai_layout(G)
-
-    # draw nodes
-    node_size = list(nodes.Hits_ratio * 1000)
-    node_color = list(nodes['P-value'])
-    nx.draw_networkx_nodes(G, pos=pos, cmap='RdYlBu', node_color=node_color, node_size=node_size)
-
-    # draw node labels
-    labels = nodes.Term.to_dict()
-    nx.draw_networkx_labels(G, pos=pos, labels=labels, font_size=8)
-
-    # draw edges
-    edge_weight = nx.get_edge_attributes(G, 'jaccard_coef').values()
-    width = list(map(lambda x: x*10, edge_weight))
-    nx.draw_networkx_edges(G, pos=pos, width=width, edge_color='#CDDBD4')
-
-    plt.show()
-
-
-    # save to GraphML format and upload to Cytoscape
-    nx.write_graphml(G, 'path')
-
-
-
-
-    s_candidate_df = candidate_df[candidate_df['enriched'] == 'S']
-
-    gene_df1 = s_candidate_df.explode("genes").reset_index(drop=True).copy(deep=True)
-    gene_df2 = gene_df1[~gene_df1['genes'].isna()]
-    s_candidate_genes = set(gene_df2['genes'].to_list())
-    print(len(s_candidate_genes))
-
-    enr_s = gp.enrich(
-        gene_list=list(s_candidate_genes),
-        gene_sets=final_gene_set_list,  # filtered_gene_set_list gene_set_list
-        background=background_gene_list,
-        outdir=None,
-        verbose=1,
-        )
-    enr_s.results.sort_values(['Adjusted P-value', 'P-value']).head(20)
-
-
-    # enr.results.Term = enr.results.Term.str.split(" \(GO").str[0]
-
-    ax = gp.dotplot(enr_s.results,
-                    column="P-value",  # TODO: can't use "Adjusted P-value"
-                    size=6,
-                    top_term=10,
-                    figsize=(6,8),
-                    title = "Enrichement: S",
-                    cmap="viridis_r"
-                    )
-    plt.show()
-
-    import networkx as nx
-
-    # build graph
-    nodes, edges = gp.enrichment_map(enr_s.results,
-                                    column="P-value",  # TODO: can't use "Adjusted P-value"
-                                    top_term=20,
-                                    )
-    G = nx.from_pandas_edgelist(edges, source='src_idx', target='targ_idx', edge_attr=['jaccard_coef', 'overlap_coef', 'overlap_genes'])
-
-    # Add missing node if there is any
-    for node in nodes.index:
-        if node not in G.nodes():
-            G.add_node(node)
-            
-            
-
-    fig, ax = plt.subplots(figsize=(8, 8))
-
-    # init node cooridnates
-    # pos=nx.layout.shell_layout(G)
-    pos=nx.layout.kamada_kawai_layout(G)
-
-    # draw nodes
-    node_size = list(nodes.Hits_ratio * 1000)
-    node_color = list(nodes['P-value'])
-    nx.draw_networkx_nodes(G, pos=pos, cmap='RdYlBu', node_color=node_color, node_size=node_size)
-
-    # draw node labels
-    labels = nodes.Term.to_dict()
-    nx.draw_networkx_labels(G, pos=pos, labels=labels, font_size=8)
-
-    # draw edges
-    edge_weight = nx.get_edge_attributes(G, 'jaccard_coef').values()
-    width = list(map(lambda x: x*10, edge_weight))
-    nx.draw_networkx_edges(G, pos=pos, width=width, edge_color='#CDDBD4')
-
-    plt.show()
-
-
-    # save to GraphML format and upload to Cytoscape
-    nx.write_graphml(G, 'path')
 
 
 

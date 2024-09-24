@@ -33,11 +33,12 @@ def load_args() -> dict:
     # int args
     args["verbose"] = int(args["verbose"])
     args["njobs"] = int(args["njobs"])
+    args["mapq"] = int(args["mapq"])
     
     if args["verbose"] > 1:
         print("Arguements given")
         for key, item in args.items():
-            print(f"\t{key}: {item}")
+            print(f"\t{key}: {item} ({type(item)})")
         print("\n")
         
     # files and directory args
@@ -51,6 +52,12 @@ def load_args() -> dict:
     
     args["input"] = Path(args["input"])
     
+    if args["verbose"] > 1:
+        print("Arguements after additional changes")
+        for key, item in args.items():
+            print(f"\t{key}: {item} ({type(item)})")
+        print("\n")
+        
     return args
 
 def get_insertion_properties(insertion) -> pd.DataFrame:
@@ -176,15 +183,15 @@ def process_bam_helper(iter_args) -> None:
     verbose = args["verbose"]
     mapq_thresh = args['mapq']
     
-    irl_bam = bam_dir / (mysample + "_IRL.bam")
-    irl_pre = bam_dir / (mysample + "_IRL.prefiltering.bam")
+    irl_bam = str(bam_dir / (mysample + "_IRL.bam"))
+    irl_pre = str(bam_dir / (mysample + "_IRL.prefiltering.bam"))
     irl_file = pysam.AlignmentFile(irl_pre, "rb")
     irl_total_reads = irl_file.count(until_eof=True) / 2
     assert irl_total_reads == (irl_file.mapped + irl_file.unmapped) / 2
     irl_file.close()
     
-    irr_bam = bam_dir / (mysample + "_IRR.bam")
-    irr_pre = bam_dir / (mysample + "_IRR.prefiltering.bam")
+    irr_bam = str(bam_dir / (mysample + "_IRR.bam"))
+    irr_pre = str(bam_dir / (mysample + "_IRR.prefiltering.bam"))
     irr_file = pysam.AlignmentFile(irr_pre, "rb")
     irr_total_reads = irr_file.count(until_eof=True) / 2
     assert irr_total_reads == (irr_file.mapped + irr_file.unmapped) / 2

@@ -57,52 +57,13 @@ def main(args):
         insert_list.append(tmp_df)
     inserts_df = pd.concat(insert_list, ignore_index=True)
 
-
-    # # gff3
-    # out_df = pd.DataFrame(inserts_df["chr"])
-    # out_df.columns = ["seqid"]
-    # out_df["source"] = "T2/Onc3"
-    # out_df["type"] = "insertion site"
-    # out_df["start"] = inserts_df["pos"]
-    # out_df["end"] = inserts_df["pos"]
-    # out_df["score"] = inserts_df["mapping_quality"]
-    # out_df["strand"] = inserts_df["strand"]
-    # out_df["phase"] = "."
-    # out_df["attributes"] = inserts_df.apply(lambda x: f"ID={x['treatment']}:{x['sampleID']}*{x['sample_sub_id']};color=#{'154360' if x['tpn_promoter_orient'] == '+' else 'D35400'}", axis=1)
-    # # strand is still the strand that the insertion was on
-    # # tpn_promoter_orient is the orientation w.r.t. the IRL or IRR library
-    # # the color in attributes is based on tpn_promoter_orient
-    # out_df = pd.concat((out_df, inserts_df.iloc[:, 11:-1]), axis=1)
-    # out_df = out_df[out_df["treatment"] == treatment]
-    # # out_df.to_csv(insertion_dir.parent / f"{treatment}.gff3", sep="\t", index=False)
-    
-    
-    # # gff2
-    # out2_df = pd.DataFrame(inserts_df["chr"])
-    # out2_df.columns = ["seqname"]
-    # out2_df["source"] = "T2/Onc3"
-    # out2_df["feature"] = "insertion site"
-    # out2_df["start"] = inserts_df["pos"]
-    # out2_df["end"] = inserts_df["pos"]
-    # out2_df["score"] = inserts_df["mapping_quality"]
-    # out2_df["strand"] = inserts_df["strand"]
-    # out2_df["frame"] = "."
-    # # out2_df["attributes"] = inserts_df.apply(lambda x: f"ID={x['treatment']}:{x['sampleID']}*{x['sample_sub_id']};color=#{'154360' if x['tpn_promoter_orient'] == '+' else 'D35400'}", axis=1)
-    # # out2_df["group "] = inserts_df["sampleID"]
-    # out2_df["group "] = inserts_df.apply(lambda x: f"{x['sampleID']}|{x['chr']}|{x['strand']}", axis=1)
-    # # strand is still the strand that the insertion was on
-    # # tpn_promoter_orient is the orientation w.r.t. the IRL or IRR library
-    # # the color in attributes is based on tpn_promoter_orient
-    # out2_df["treatment"] = inserts_df["treatment"]
-    # out2_df = out2_df[out2_df["treatment"] == treatment]
-    # # out2_df.drop("treatment", axis=1).to_csv(insertion_dir.parent / f"{treatment}.gff2", sep="\t", index=False, header=False)
-    
     key = {
         'chr1': 1, 'chr2': 2, 'chr3': 3, 'chr4': 4, 'chr5': 5, 
         'chr6': 6, 'chr7': 7, 'chr8': 8, 'chr9': 9, 'chr10': 10, 
         'chr11': 11,'chr12': 12, 'chr13': 13, 'chr14': 14, 'chr15': 15, 
         'chr16': 16, 'chr17': 17, 'chr18': 18, 'chr19': 19, 
         'chrX': 20, 'chrY': 21,'chrM': 22}
+    
     # bed
     out2_df = pd.DataFrame(inserts_df["chr"])
     out2_df.columns = ["chrom"]
@@ -118,8 +79,7 @@ def main(args):
     # out2_df["blockSizes"] = ""
     # out2_df["blockStart"] = ""
     out2_df = out2_df[out2_df["name"] == treatment]
-    out2_df = out2_df.sort_values("chromStart")
-    out2_df = out2_df.sort_values("chrom", key=lambda x: x.map(key))
+    out2_df = out2_df.sort_values("chrom", key=lambda x: x.map(key)).sort_values("chromStart")
     out2_df.to_csv(insertion_dir.parent / f"{treatment}.bed", sep="\t", index=False, header=False)
 
 
