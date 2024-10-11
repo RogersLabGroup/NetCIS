@@ -98,3 +98,5 @@ def main() -> None:
     
 if __name__ == "__main__":
     main()
+    # TODO: 10/9/24 - Deprecate whole script?
+    

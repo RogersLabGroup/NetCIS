@@ -9,7 +9,7 @@ from docopt import docopt
 def load_args():
     doc = """  
     Usage: 
-        insertions_to_gff3.py --output_prefix DIR --treatment STR [options]
+        insertions_to_bed.py --output_prefix DIR --treatment STR [options]
     
      -o, --output_prefix=DIR           a prefix of the output directory that will have "-analysis" appended to it
      -t, --treatment=STR
@@ -38,9 +38,10 @@ def load_args():
 def main(args):
     insertion_dir = args["insertion_dir"]
     treatment = args["treatment"]
-    
+    # TODO: since we are going to be reading in meta files, this script should work without
+    # a given treatment arg and simply run for the treatment given in the meta file
     insert_list = []
-    for file in insertion_dir.iterdir():
+    for file in tqdm(insertion_dir.iterdir()):
         tmp_df = pd.read_csv(file, sep="\t")
         tmp_meta = file.name.split(".")[0].split("-")
         # TODO: this needs to be cleaned up and a better standard implemented.

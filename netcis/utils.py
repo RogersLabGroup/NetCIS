@@ -38,3 +38,5 @@ def get_logger(result_dir_path, loglevel) -> logging.Logger:
     logger = logging.getLogger(__name__)
     logger.info(sys.argv)
     return logger
+
+# TODO: 10/9/24 - Deprecate whole script?

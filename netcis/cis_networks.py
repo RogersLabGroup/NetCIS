@@ -164,15 +164,17 @@ def pcis_to_cis_with_stats(overlap_df, case_chrom_subgraphs, control_chrom_subgr
         which can be used for the final determination if the pCIS is now a CIS
     """
     
+    # skip if there were no overlaps and return empty dataframe
+    if len(overlap_df) == 0:
+        return pd.DataFrame() , pd.DataFrame() 
+    
     # create the final CIS by grouping the insertion sites (IS) from each pCIS overlap based on the conditions of the overlap
     IS_df_list = []
     CIS_df_list = []
     for overlap in overlap_df.itertuples():
         case_ind = overlap.case
         control_ind = overlap.control
-        
-        # TODO: refactor this with functions to be neater and shorter
-        
+                
         # if multiple case 
         if type(case_ind) is list:
             # get single control
@@ -257,8 +259,8 @@ def pcis_to_cis_with_stats(overlap_df, case_chrom_subgraphs, control_chrom_subgr
             
             case_pos_min = min(case_pos)
             case_pos_max = max(case_pos)
-            control_pos_min = None
-            control_pos_max = None
+            control_pos_min = np.nan
+            control_pos_max = np.nan
             
             case_IS = len(tmp_IS)
             control_IS = 0
@@ -277,8 +279,8 @@ def pcis_to_cis_with_stats(overlap_df, case_chrom_subgraphs, control_chrom_subgr
             num_case_samples = 0
             num_control_samples = len({ x for y in [ control_G.nodes[node]["sample_IDs"] for node in control_G.nodes ] for x in y })
         
-            case_pos_min = None
-            case_pos_max = None
+            case_pos_min = np.nan
+            case_pos_max = np.nan
             control_pos_min = min(control_pos)
             control_pos_max = max(control_pos)
 
@@ -375,6 +377,12 @@ def pcis_to_cis_with_stats(overlap_df, case_chrom_subgraphs, control_chrom_subgr
     CIS_df["case"] = case
     CIS_df["control"] = control
     CIS_df["chrom"] = chrom
+    
+    cols1 = ['case_pos_min', 'case_pos_max', 'control_pos_min', 'control_pos_max']
+    CIS_df[cols1] = CIS_df[cols1].astype('float')
+    cols2 = ['case_index', 'control_index']
+    CIS_df[cols2] = CIS_df[cols2].astype('object')
+
     return IS_df, CIS_df
 
 def run_per_chrom(iter_args):
@@ -426,7 +434,7 @@ def main(args):
     jobs = args["njobs"]
     num_chr = len(chroms)
     if num_chr < jobs:
-        print(f"ATTENTION: Reducing number of jobs from {jobs} to {num_chr}, since there are only {num_chr} chromosomes present.")
+        # print(f"ATTENTION: Reducing number of jobs from {jobs} to {num_chr}, since there are only {num_chr} chromosomes present.")
         jobs = len(chroms)
             
     iter_args = [ (chrom, args) for chrom in chroms ]
@@ -441,21 +449,14 @@ def main(args):
     IS_df.to_csv(output_res / "IS.tsv", sep="\t", index=False)
     
     CIS_list = [ res_dict["cis"] for res_dict in res_dict_list ]
-    # TODO: prevent deprecation warning
-    """
-    /project/cs-myers/MathewF/projects/Laura-SB-Analysis/NetCIS/netcis/cis_networks.py:449: 
-        FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. 
-        In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. 
-        To retain the old behavior, exclude the relevant entries before the concat operation.
-            CIS_df = pd.concat(new_CIS_list, ignore_index=True)
-    """
-    # remove empty dataframes. slated for future deprecation in pandas api
-    new_CIS_list = []
-    for cis in CIS_list:
-        if not cis.empty and cis.notnull().any().any() and len(cis) >= 1:
-            new_CIS_list.append(cis)
-            
-    CIS_df = pd.concat(new_CIS_list, ignore_index=True)
+    
+    # # remove empty dataframes. slated for future deprecation in pandas api
+    # new_CIS_list = []
+    # for cis in CIS_list:
+    #     if not cis.empty and cis.notnull().any().any() and len(cis) >= 1:
+    #         new_CIS_list.append(cis)
+    
+    CIS_df = pd.concat(CIS_list, ignore_index=True)
     CIS_df.to_csv(output_res / "CIS.tsv", sep="\t", index=False) 
     
 if __name__ == "__main__": 

@@ -167,7 +167,7 @@ def create_graph(iter_args):
     G.add_edges_from(find_edges(G.nodes(), threshold))
     
     if verbose > 1:
-        graph_properties(G)
+        graph_properties(G, verbose=verbose)
 
     # save the graph
     nx.write_gml(G, save_dir / "G.gml")
@@ -213,12 +213,12 @@ def main(args) -> None:
         jobs = args["njobs"]
         num_chr = len(chrom_list)
         if num_chr < jobs:
-            print(f"Reducing number of jobs from {jobs} to {num_chr}, since there are only {num_chr} chromosomes present.")
+            # print(f"Reducing number of jobs from {jobs} to {num_chr}, since there are only {num_chr} chromosomes present.")
             jobs = len(chrom_list)
             
         # construct CIS network per chromosome for treatment insertion
         iter_gen = create_graph_generator(chrom_list, treatment_df, out_dir, args)
-        iter_gen = tqdm(iter_gen)
+        # iter_gen = tqdm(iter_gen)
         with Pool(jobs) as p:
             for _ in p.imap_unordered(create_graph, iter_gen):
                 pass

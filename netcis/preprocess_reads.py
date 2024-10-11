@@ -36,7 +36,7 @@ def load_args() -> dict:
     args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
     
     # int args
-    int_opts = ["verbose", "ntask", "npara", "mapq"]
+    int_opts = ["verbose", "ntask", "npara"]
     for opts in int_opts:
         args[opts] = int(args[opts])
     
@@ -88,12 +88,14 @@ def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_i
     
     # filter reads
     sam_sort = f"samtools sort -@ {ntask} -o {pre_bam_file} {pre_bam_file} > /dev/null 2>&1"
-    sam_filter = f"samtools view -h -@ {ntask} -f 2 -1 -o {bam_file} {pre_bam_file}"
+    sam_filter = f"samtools view -h -@ {ntask} -f 3 -1 -o {bam_file} {pre_bam_file}"
     sam_index = f"samtools index -@ {ntask} {bam_file}"
     sam_index2 = f"samtools index -@ {ntask} {pre_bam_file}"
     sam_stats = f"samtools idxstats {bam_file} > {report_output / bam_report}"
+    
     os.system(f"{cutadapt}; {mapper}; {sam_sort}; {sam_filter}; {sam_index}; {sam_index2}; {sam_stats}")
-    os.system(f"rm {trim1_f} {trim1_r}")  # {pre_bam_file} 
+    os.system(f"rm {trim1_f} {trim1_r}")  # {pre_bam_file}
+    
     sys.stdout.flush()
     sys.stderr.flush()
 

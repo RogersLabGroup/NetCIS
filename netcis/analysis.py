@@ -15,6 +15,9 @@ import matplotlib.pyplot as plt
 import seaborn.objects as so
 from seaborn import axes_style, plotting_context
 
+# # gseapy has some future warning that they have not fixed yet, so we prevent them from showing up with this
+# import warnings
+# warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
 def load_args() -> dict:
@@ -317,7 +320,7 @@ def run_gse(candidate_df, treatment, gene_sets, background, output, verbose):
     plt.savefig(output / f"enrichr-dotplot-{treatment}.svg")
     plt.close()
         
-        
+    
         
     # build graph
     # TODO: can't use "Adjusted P-value" cause none are significant
@@ -468,7 +471,7 @@ def main(args):
     
 
     # load in files
-    IS_df = pd.read_csv(cis_dir / "IS.tsv", sep="\t")
+    # IS_df = pd.read_csv(cis_dir / "IS.tsv", sep="\t")
     CIS_df = pd.read_csv(cis_dir / "CIS.tsv", sep="\t")
     annot_file_df = pd.read_csv(annotation_file, sep="\t")
     annot_df = process_annot_file(annot_file_df, marker_type, feature_type, verbose)
@@ -476,6 +479,7 @@ def main(args):
     # process results and annotation fileargs
     data_df = cast_indexes(CIS_df)
     # data_df = filter_low_read_CIS(data_df, verbose)
+    # TODO: make faster somehow
     data_df["genes"] = annotate_cis(data_df, annot_df, marker_expander)
     # remove G-protein genes cause...there's a lot?
     data_df["genes"] = data_df["genes"].apply(lambda x: remove_Gm(x))
@@ -485,15 +489,17 @@ def main(args):
     # multi-test correction with Benjaminini-Yekutieli method and the -log10 transformation
     data_df["ranksums-neglog"] = -np.log10(data_df["ranksums"])
     data_df["fishers_exact-neglog"] = -np.log10(data_df["fishers_exact"])
-    data_df["binomial-neglog"] = -np.log10(data_df["binomial"])
-
+    with np.errstate(divide = 'ignore'):
+        data_df["binomial-neglog"] = -np.log10(data_df["binomial"])
+    
     data_df["ranksums-BY"] = false_discovery_control(data_df["ranksums"], method="by")
     data_df["fishers_exact-BY"] = false_discovery_control(data_df["fishers_exact"], method="by")
     data_df["binomial-BY"] = false_discovery_control(data_df["binomial"], method="by")
 
     data_df["ranksums-BY-neglog"] = -np.log10(data_df["ranksums-BY"])
     data_df["fishers_exact-BY-neglog"] = -np.log10(data_df["fishers_exact-BY"])
-    data_df["binomial-BY-neglog"] = -np.log10(data_df["binomial-BY"])
+    with np.errstate(divide = 'ignore'):
+        data_df["binomial-BY-neglog"] = -np.log10(data_df["binomial-BY"])
 
     # rank CIS by rank aggregation
     rankers = data_df[['ranksums-neglog', 'fishers_exact-neglog', 'total_read_count', 'total_num_samples']]
@@ -501,8 +507,8 @@ def main(args):
         
     # CIS enrichment
     data_df['enriched'] = ""
-    data_df.loc[data_df[(data_df['LFC'] < 0)].index, 'enriched'] = case_group
-    data_df.loc[data_df[(data_df['LFC'] > 0)].index, 'enriched'] = control_group
+    data_df.loc[data_df[(data_df['LFC'] < 0)].index, 'enriched'] = control_group
+    data_df.loc[data_df[(data_df['LFC'] > 0)].index, 'enriched'] = case_group
 
     # add in genome viewer annotation and save CIS data
     data_df["CIS_start"] = data_df[["case_pos_min", "case_pos_max", "control_pos_min", "control_pos_max"]].min(axis=1).astype(int)

@@ -47,16 +47,18 @@ def load_args() -> dict:
     
     args["insertions_output"] = Path(args["output_prefix"] + "-insertions")
     args["insertions_output"].mkdir(parents=True, exist_ok=True)
+    
+    # TODO: 10/9/24 - Deprecate depth output?
     args["depth_output"] = Path(args["output_prefix"] + "-insertions-depth")
     args["depth_output"].mkdir(parents=True, exist_ok=True)
     
     args["input"] = Path(args["input"])
     
-    if args["verbose"] > 1:
-        print("Arguements after additional changes")
-        for key, item in args.items():
-            print(f"\t{key}: {item} ({type(item)})")
-        print("\n")
+    # if args["verbose"] > 1:
+    #     print("Arguements after additional changes")
+    #     for key, item in args.items():
+    #         print(f"\t{key}: {item} ({type(item)})")
+    #     print("\n")
         
     return args
 
@@ -117,7 +119,7 @@ def read_is_quality(read, mapq_thresh) -> bool:
         return False
     
     # filter reads using quality mapping score
-    if read.mapping_quality > mapq_thresh:
+    if not (read.mapping_quality >= mapq_thresh):
         return False
     
     return True
@@ -136,6 +138,7 @@ def process_bam(file, mapq_thresh, verbose):
     assert bam.mapped == sum([ bam.count(contig=chrom, until_eof=True) for chrom in bam.references ]), \
         "mapped reads are not equal to total reads, this theoretically shouldn't happen"
     
+    # TODO: nearly all of this could be done using samtools and would be faster, but would use python to construct .tsv files
     insertions = []
     i = 0
     for i, read1 in enumerate(bam.fetch()):  # multiple_iterators=True
@@ -156,13 +159,13 @@ def process_bam(file, mapq_thresh, verbose):
         if read_is_quality(read1, mapq_thresh):
             insert_properties = get_insertion_properties(read1)
             insertions.append(insert_properties)
-                
+
         # check if read 2 (the mate read) is quality and can be used for insertion properties
         else:  
             if read_is_quality(read2, mapq_thresh):
                 insert_properties = get_insertion_properties(read2)
                 insertions.append(insert_properties)
-                
+        
     bam.close()
     if verbose > 1:
         print(f"number of reads: {i}")
