@@ -6,7 +6,6 @@ from tqdm import tqdm
 from docopt import docopt
 import numpy as np
 import pandas as pd
-from pandas import read_csv, concat, DataFrame
 import networkx as nx
 
     
@@ -137,7 +136,8 @@ def find_edges(ordered_nodes, threshold):
     nodes1 = ordered_nodes[edges_ind[1][keep_nodes]]  # 1d array
     # the rows
     nodes2 = ordered_nodes[edges_ind[0][keep_nodes]]  # 1d array
-    # and edge weights (TODO: which can be modified for a differnt weighting method, maybe 1 / log10(x) instead?)
+    # and edge weights 
+    # NOTE: edge weights can be modified for a differnt weighting method, maybe 1 / log10(x) instead?
     nodes_dist = 1 / dist_nodes[edges_ind][keep_nodes]  # 1d array
     # combine the nodes and weights into an iterable that can be passed wholly into the graph
     # an edge is defined as the first node, the second node, and then a dict of attributes, such as weight
@@ -149,18 +149,19 @@ def create_graph(iter_args):
     
     G = nx.Graph()
     cols = ["CPM", "counts_irr", "counts_irl"]
+    # NOTE: 10/28/24 - group by strand and promoter orientation in future version
     tmp_group = chrom_df.groupby(by=['chr', 'pos'], sort=False, as_index=False, dropna=False)
     insertion_nodes_df = tmp_group[cols].sum()
     insertion_nodes_df.insert(2, "counts", tmp_group['count'].count().pop('count'))
 
     # add in info about which samples are in each insertion site
-    tmp_samples = chrom_df.groupby(by=['chr', 'pos'], sort=False, as_index=False, dropna=False)["sampleID"].apply(lambda x: x.unique())
+    tmp_samples = chrom_df.groupby(by=['chr', 'pos'], sort=False, as_index=False, dropna=False)["sample_id"].apply(lambda x: x.unique())
     if tmp_samples.size == 0:
         insertion_nodes_df["n_samples"] = 0
         insertion_nodes_df["sample_IDs"] = []
     else:
-        insertion_nodes_df.insert(6, "n_samples", tmp_samples["sampleID"].apply(lambda x: len(x)))
-        insertion_nodes_df.insert(6, "sample_IDs", tmp_samples["sampleID"].apply(lambda x: list(x)).to_list())
+        insertion_nodes_df.insert(6, "n_samples", tmp_samples["sample_id"].apply(lambda x: len(x)))
+        insertion_nodes_df.insert(6, "sample_IDs", tmp_samples["sample_id"].apply(lambda x: list(x)).to_list())
 
     # add nodes and edges to graph
     G.add_nodes_from(add_nodes(insertion_nodes_df))
@@ -187,8 +188,10 @@ def create_graph_generator(chrom_list, treatment_inserts, treatment_dir, args):
         yield ( treatment_chrom_inserts, treatment_chrom_dir, args["threshold"], args["verbose"] )
 
 def main(args) -> None:
+    verbose = args["verbose"]
+    
     # get all files in data dir, load each file as pandas.DataFrame
-    insertion_list = [ pd.read_csv(file, sep="\t") for file in args["depth_dir"].iterdir() ]
+    insertion_list = [ pd.read_pickle(file) for file in args["depth_dir"].iterdir() ]
     inserts_df = pd.concat(insertion_list, ignore_index=True)
     inserts_df.insert(4, "counts_irr", np.where(inserts_df['library'] == 'IRR', 1, 0))
     inserts_df.insert(5, "counts_irl", np.where(inserts_df['library'] == 'IRL', 1, 0))
@@ -197,17 +200,22 @@ def main(args) -> None:
     treatment_list = inserts_df["treatment"].unique()
 
     # total unique samples across all treatments
-    total_samples = inserts_df["sampleID"].unique().shape[0]
+    total_samples = inserts_df["sample_id"].unique().shape[0]
     metadata = {"total": total_samples}
 
+    if verbose:
+        print('pcis_networks.py')
+        
     for treatment in treatment_list:
-        print(treatment)
+        if verbose:
+            print(treatment)
+            
         # prepare output
         out_dir = args['output'] / treatment
         out_dir.mkdir(parents=True, exist_ok=True)
         
         treatment_df = inserts_df[inserts_df["treatment"] == treatment]
-        metadata[treatment] = treatment_df["sampleID"].unique().shape[0]
+        metadata[treatment] = treatment_df["sample_id"].unique().shape[0]
         
         # don't allow more jobs than there are chromosomes
         jobs = args["njobs"]
@@ -223,7 +231,10 @@ def main(args) -> None:
             for _ in p.imap_unordered(create_graph, iter_gen):
                 pass
             p.close()
-            
+    
+    if verbose:
+        print()
+    
     # # save sample numbers as meta data for network analysis
     # samples, counts = zip(*metadata.items())
     # meta_df = pd.DataFrame({"samples": samples, "counts": counts})

@@ -1,6 +1,7 @@
-from pathlib import Path
-import sys
+from io import StringIO
 from multiprocessing import Pool
+from pathlib import Path
+import sys, subprocess
 
 import pysam
 import pandas as pd
@@ -23,7 +24,6 @@ def load_args() -> dict:
     Options:
      -h, --help                         show this help message and exit
      -v, --verbose=N                    print more verbose information if available using 0, 1 or 2 [default: 0]
-     -m, --mapq=N                       integer 0-255, higher value is higher quality. See fasta mapQ score for more info [default: 13]
      -j, --njobs=N                      an integer for the number of parallel processes to work on multiple files at the same time [default: 1]
     """
     
@@ -33,7 +33,6 @@ def load_args() -> dict:
     # int args
     args["verbose"] = int(args["verbose"])
     args["njobs"] = int(args["njobs"])
-    args["mapq"] = int(args["mapq"])
     
     if args["verbose"] > 1:
         print("Arguements given")
@@ -48,248 +47,261 @@ def load_args() -> dict:
     args["insertions_output"] = Path(args["output_prefix"] + "-insertions")
     args["insertions_output"].mkdir(parents=True, exist_ok=True)
     
-    # TODO: 10/9/24 - Deprecate depth output?
     args["depth_output"] = Path(args["output_prefix"] + "-insertions-depth")
     args["depth_output"].mkdir(parents=True, exist_ok=True)
     
+    args["strand_output"] = Path(args["output_prefix"] + "-insertions-depth-strand")
+    args["strand_output"].mkdir(parents=True, exist_ok=True)
+    
     args["input"] = Path(args["input"])
     
-    # if args["verbose"] > 1:
-    #     print("Arguements after additional changes")
-    #     for key, item in args.items():
-    #         print(f"\t{key}: {item} ({type(item)})")
-    #     print("\n")
-        
     return args
 
-def get_insertion_properties(insertion) -> pd.DataFrame:
+def sort_chrom_pos(df, chrom, pos):
     """
-    record the insertions stats (direction, +/-, and all that)
-    NOTE: here is where additional statistics and or properties for each insertion site can be added
+    Sorts the dataframe by chromosome and position
+    """
+    key = {
+        'chr1': 1, 'chr2': 2, 'chr3': 3, 'chr4': 4, 'chr5': 5, 
+        'chr6': 6, 'chr7': 7, 'chr8': 8, 'chr9': 9, 'chr10': 10, 
+        'chr11': 11,'chr12': 12, 'chr13': 13, 'chr14': 14, 'chr15': 15, 
+        'chr16': 16, 'chr17': 17, 'chr18': 18, 'chr19': 19, 
+        'chrX': 20, 'chrY': 21,'chrM': 22,
+        }
+    custom_sort_key = lambda x: x.map(key)
+    df['chrom_custom_sort'] = custom_sort_key(df[chrom])
+    df = df.sort_values(by=['chrom_custom_sort', pos], ignore_index=True).drop(columns=['chrom_custom_sort'])
+    return df
+
+def run_command(command):
+    """
+    Run a command in the shell and return the result
+    """
+    result = subprocess.run(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode != 0:
+        print(f"Error in command: {command}")
+        print(result.stderr.decode())
+    return result
+
+def process_bam(bam_file):
+    """
+    Extract insertion information from a BAM file and save it to a TSV file.
+    
+    *the following code is derived from ChatGPT, verified working - 11/11/2024*
+    
+    Q:
+    how do I extract information from bam file reads? I want the reference name, position, strand, reference length,
+    query length, read length, mapping quality, and the read name, the first 10 and last 10 bases of the sequences and
+    I only want to use samtools to extract this information.
+    
+    A: *edited to correct errors*
+    samtools view output/2020_SB/results-bam/EL4-18_2-LT_IRL.bam | awk '{
+        chr = $3;                                   # Reference name
+        pos = $4;                                   # Position
+        strand = ($2 == 99) ? "-" : "+";            # Read is paired, proper, mate is revered, and is read1. All reads are read1
+        query_length = length($10);                 # Length of the read
+        map_quality = $5;                           # Mapping quality
+        read_name = $1;                             # Read name
+        first_10 = substr($10, 1, 10);              # First 10 bases of read sequence
+        last_10 = substr($10, query_length - 9);    # Last 10 bases of read sequence
+
+        print chr, pos, strand, query_length, map_quality, read_name, first_10 "-" last_10 }'
+
     """
     
-    if insertion.get_forward_sequence()[:2] == "TA":
-        TA_type = "first"
-    elif insertion.get_forward_sequence()[-2:] == "TA":
-        TA_type = "last"
-    else:
-        TA_type = "none"
-        
-    tmp = insertion.get_forward_sequence()
-    read_first_last = tmp[:10] + "-" + tmp[-10:]
-    tmp = insertion.get_reference_sequence()
-    ref_first_last = tmp[:10] + "-" + tmp[-10:]
-        
-    res = {
-        "chr": [insertion.reference_name],
-        "pos": [insertion.reference_start + 1],  # 0-based left most coordinate, so we need to add 1 to it to be in line with sam file and gff3 file specs
-        "strand": [insertion.is_forward],
-        "ref_length": [insertion.reference_length],
-        "query_length": [
-            insertion.infer_query_length()
-        ],  # exludes hard-clipped bases
-        "read_length": [
-            insertion.infer_read_length()
-        ],  # includes hard-clipped bases. should be equal to len(query_sequence)
-        "mapping_quality": [insertion.mapping_quality],  # MAPQ: MAPping Quality.
-        # MAPQ equals −10 log10 Pr{mapping position is wrong}, rounded to the nearest integer.
-        # A value 255 indicates that the mapping quality is not available.
-        # otherwise, the higher the number, the more confident of the quality of the mapping
-        # see solution for x in wolfram
-        #       254 = -10 * log10(x)
-        #       11 = -10 * log10(x)
-        "read_name": [insertion.query_name],
-        "TA_location": [TA_type],
-        "read_first_last": [read_first_last],
-        "ref_first_last": [ref_first_last],
-        # additional features we could want:
-            # query_alignment_sequence - excludes soft clupped bases
-            # query_sequence - includes soft clipped bases
-    }
-    res = pd.DataFrame.from_dict(res)
-    return res
-
-def read_is_quality(read, mapq_thresh) -> bool:
-    # that is paired
-    if not read.is_paired:
-        return False
-
-    # this is mapped
-    if not read.is_mapped:
-        return False
-    
-    # filter reads using quality mapping score
-    if not (read.mapping_quality >= mapq_thresh):
-        return False
-    
-    return True
-
-def process_bam(file, mapq_thresh, verbose):
-    """
-    Filter out low quality insertions
-    This only can run on paired read sequencing data
-    """
-    # print(file)
-    bam = pysam.AlignmentFile(file, "rb")
     # count the coverage for each contig for read normalization later on
-    # divide by 2 since these are paired reads and I count two reads that are paired as one read count
-    reads_per_chrom_dict = { chrom: int(bam.count(contig=chrom, until_eof=True) / 2) for chrom in bam.references }
+    bam = pysam.AlignmentFile(bam_file, "rb")
+    reads_per_chrom_dict = { chrom: int(bam.count(contig=chrom, until_eof=True)) for chrom in bam.references }
     assert bam.unmapped == 0, "there are unmapped reads"
     assert bam.mapped == sum([ bam.count(contig=chrom, until_eof=True) for chrom in bam.references ]), \
         "mapped reads are not equal to total reads, this theoretically shouldn't happen"
-    
-    # TODO: nearly all of this could be done using samtools and would be faster, but would use python to construct .tsv files
-    insertions = []
-    i = 0
-    for i, read1 in enumerate(bam.fetch()):  # multiple_iterators=True
-        # only look at read 1
-        if not read1.is_read1:
-            continue
-        
-        # must have a mate read that is mapped for .mate() to return properly
-        if read1.mate_is_unmapped or (not read1.is_paired):
-            continue
-        
-        # read 1 and read 2 must map to the same contig
-        read2 = bam.mate(read1)
-        if read1.reference_name != read2.reference_name:
-            continue
-        
-        # if the read1 is a quality read, then get the insertions properties
-        if read_is_quality(read1, mapq_thresh):
-            insert_properties = get_insertion_properties(read1)
-            insertions.append(insert_properties)
-
-        # check if read 2 (the mate read) is quality and can be used for insertion properties
-        else:  
-            if read_is_quality(read2, mapq_thresh):
-                insert_properties = get_insertion_properties(read2)
-                insertions.append(insert_properties)
-        
     bam.close()
-    if verbose > 1:
-        print(f"number of reads: {i}")
     
-    # check if there were any inseritons at all to avoid errors from pandas.concat()
-    if len(insertions) == 0:
+    # extract insertion information from bam file
+    process_insertion_info = (
+        f"""
+        samtools view {bam_file} | awk ' OFS="," {{ 
+        chr=$3;                                     # Reference name (contig/chromosome)
+        pos=$4;                                     # Position
+        strand=($2 == 99);                          # Read is paired, proper, mate is reversed, and is read1. All reads are read1 and if read 2 is reversed, read 1 is forward (+)
+        query_length=length($10);                   # Length of the read
+        map_quality=$5;                             # Mapping quality
+        read_name=$1;                               # Read name
+        first_10 = substr($10, 1, 10);              # First 10 bases of read sequence
+        last_10 = substr($10, query_length - 9);    # Last 10 bases of read sequence
+    
+        print chr, pos, strand, query_length, map_quality, read_name, first_10 "-" last_10 }}'
+        """
+    )
+    result = run_command(process_insertion_info)
+    assert result.returncode == 0, f"Error in process_insertion_info {result.returncode}"
+    
+    # load data from stdout and add additional features
+    cols = ["chr", "pos", "strand", "query_length", "map_quality", "read_name", "read_first_last"]
+    df_str = StringIO(result.stdout.decode())
+    if len(df_str.getvalue()) == 0:
         return None, reads_per_chrom_dict
-    else:
-        df = pd.concat(insertions, axis=0).reset_index(drop=True)
-        df["tpn_promoter_orient"] = df["strand"]
-        return df, reads_per_chrom_dict
+    df = pd.read_csv(df_str, sep=",", header=None)
+    df.columns = cols
+    df['strand'] = df['strand'].astype(bool)
+    df["tpn_promoter_orient"] = df["strand"]
+    return df, reads_per_chrom_dict
+    
+def process_individual_insertions(tpn_orient, library, inserts_df):
+    if (inserts_df is not None):
+        # set transposon promoter orientation depending on sequencing library
+        # For IRR: + if forward, - if not. For IRL this is reversed. Also, make the orientations easier to read (+/-)
+        if tpn_orient == "-":
+            inserts_df["tpn_promoter_orient"] = ~inserts_df["tpn_promoter_orient"]
+        inserts_df["tpn_promoter_orient"] = np.where(inserts_df["tpn_promoter_orient"], "+", "-")
+        inserts_df["strand"] = np.where(inserts_df["strand"], "+", "-")
+        inserts_df["library"] = library
+    return inserts_df
 
-def process_bam_helper(iter_args) -> None:
-    mysample, args = iter_args
+def group_insertions(inserts_df, total_reads, reads_per_chrom):
+    depth_lib_df = None
+    strand_lib_df = None
+    if (inserts_df is not None):
+        # use depth (CPM) for insertion file
+        # divide each insertion site by the total reads on that chromosome
+        inserts_df["count"] = 0  # irrelevant what this holds, it's just a count in the next line
+        depth_lib_df = inserts_df.groupby(
+            by=["chr", "pos", "library"], sort=False, as_index=False, dropna=False
+            ).count()[["chr", "pos", "library", "count"]]
+        depth_lib_df["CPM"] = depth_lib_df.apply(lambda x: (x["count"] / total_reads) * 1e5, axis=1)
+        depth_lib_df["chrom_norm"] = depth_lib_df.apply(lambda x: x["count"] / (reads_per_chrom[x["chr"]]), axis=1)
+        
+        # use depth (CPM) and strand and transposon orientation for insertion file
+        strand_lib_df = inserts_df.groupby(
+            by=["chr", "pos", "strand", "tpn_promoter_orient", "library"], sort=False, as_index=False, dropna=False
+            ).count()[["chr", "pos", "strand", "tpn_promoter_orient", "library", "count"]]
+        strand_lib_df["CPM"] = strand_lib_df.apply(lambda x: (x["count"] / total_reads) * 1e5, axis=1)
+        strand_lib_df["chrom_norm"] = strand_lib_df.apply(lambda x: x["count"] / (reads_per_chrom[x["chr"]]), axis=1)
+    return depth_lib_df, strand_lib_df
+    
+def get_total_reads(prefilter_bam_file):
+    # prefiltering bam file has paired reads, while the final bam file has single reads
+    file = pysam.AlignmentFile(prefilter_bam_file, "rb")
+    total_reads = file.count(until_eof=True) / 2  # when using paired reads, divide by 2
+    assert total_reads == (file.mapped + file.unmapped) / 2
+    file.close()
+    return total_reads
+
+def remove_same_read_name(pos_orient_df, neg_orient_df):
+    """remove reads that are in both dataframes"""
+
+    if pos_orient_df is None and neg_orient_df is None:
+        return None, None
+    elif pos_orient_df is None:
+        return None, neg_orient_df
+    elif neg_orient_df is None:
+        return pos_orient_df, None
+    else:
+        tmp_pos_orient_df = pos_orient_df[~pos_orient_df['read_name'].isin(neg_orient_df['read_name'])].copy()
+        tmp_neg_orient_df = neg_orient_df[~neg_orient_df['read_name'].isin(pos_orient_df['read_name'])].copy()
+        
+        orient_dup = len(pos_orient_df) - len(tmp_pos_orient_df)
+        # if orient_dup:
+        #     print(f"\tduplicate reads between pos and neg orientation: {orient_dup}")
+            
+        return tmp_pos_orient_df, tmp_neg_orient_df
+
+
+def process_bam_helper(iter_args: dict) -> None:
+    """Find quality insertion in IRR and IRL libraries and convert them to single insertion site format.
+
+    Args:
+        iter_args (dict): _description_
+    """
+    
+    row, args = iter_args
+    sample_id = row.iloc[0]
     bam_dir = args["bam_output"]
     insertions_dir = args["insertions_output"]
     depth_dir = args["depth_output"]
+    strand_dir = args["strand_output"]
     verbose = args["verbose"]
-    mapq_thresh = args['mapq']
+   
+   
+    # IRL transposon orientation positive (with strand)
+    irl_bam_pos_orient = str(bam_dir / (sample_id + "_IRL.orient_pos.bam"))
+    irl_prefilter_pos_orient = str(bam_dir / (sample_id + "_IRL.prefiltering-orient_pos.bam"))
+    irl_pos_orient_total_reads = get_total_reads(irl_prefilter_pos_orient)
+    tmp_irl_pos_orient, irl_pos_orient_reads_per_chrom = process_bam(irl_bam_pos_orient)
+    individual_irl_pos_orient = process_individual_insertions('+', 'IRL', tmp_irl_pos_orient)
     
-    irl_bam = str(bam_dir / (mysample + "_IRL.bam"))
-    irl_pre = str(bam_dir / (mysample + "_IRL.prefiltering.bam"))
-    irl_file = pysam.AlignmentFile(irl_pre, "rb")
-    irl_total_reads = irl_file.count(until_eof=True) / 2
-    assert irl_total_reads == (irl_file.mapped + irl_file.unmapped) / 2
-    irl_file.close()
+    # IRL transposon orientation negative (against strand)
+    irl_bam_neg_orient = str(bam_dir / (sample_id + "_IRL.orient_neg.bam"))
+    irl_prefilter_neg_orient = str(bam_dir / (sample_id + "_IRL.prefiltering-orient_neg.bam"))
+    irl_neg_orient_total_reads = get_total_reads(irl_prefilter_neg_orient)
+    tmp_irl_neg_orient, irl_neg_orient_reads_per_chrom = process_bam(irl_bam_neg_orient)
+    individual_irl_neg_orient = process_individual_insertions('-', 'IRL', tmp_irl_neg_orient)
+
+    # remove same read names and return the new pos and neg orient dataframes for group_insertions
+    tmp_ind_irl_pos_orient, tmp_ind_irl_neg_orient = remove_same_read_name(individual_irl_pos_orient, individual_irl_neg_orient)
+    depth_irl_df_pos_orient, strand_irl_df_pos_orient = group_insertions(tmp_ind_irl_pos_orient, irl_pos_orient_total_reads, irl_pos_orient_reads_per_chrom)
+    depth_irl_df_neg_orient, strand_irl_df_neg_orient = group_insertions(tmp_ind_irl_neg_orient, irl_neg_orient_total_reads, irl_neg_orient_reads_per_chrom)
+
+
+    # IRR transposon orientation positive (with strand)
+    irr_bam_pos_orient = str(bam_dir / (sample_id + "_IRR.orient_pos.bam"))
+    irr_prefilter_pos_orient = str(bam_dir / (sample_id + "_IRR.prefiltering-orient_pos.bam"))
+    irr_pos_orient_total_reads = get_total_reads(irr_prefilter_pos_orient)
+    tmp_irr_pos_orient, irr_pos_orient_reads_per_chrom = process_bam(irr_bam_pos_orient)
+    individual_irr_pos_orient = process_individual_insertions('+', 'IRR', tmp_irr_pos_orient)
     
-    irr_bam = str(bam_dir / (mysample + "_IRR.bam"))
-    irr_pre = str(bam_dir / (mysample + "_IRR.prefiltering.bam"))
-    irr_file = pysam.AlignmentFile(irr_pre, "rb")
-    irr_total_reads = irr_file.count(until_eof=True) / 2
-    assert irr_total_reads == (irr_file.mapped + irr_file.unmapped) / 2
-    irr_file.close()
-
-    # find quality insertion in IRR and IRL libraries and convert them to single insertion site format
-    tmp_irl, irl_reads_per_chrom = process_bam(irl_bam, mapq_thresh, verbose)
-    inserts_irl_df = None
-    if (tmp_irl is not None):  # if no insertions present, process_bam returns None
-        tmp_irl["count"] = 0  # irrelevant what this holds, it's just a count in the next line
-        inserts_irl_df = tmp_irl.groupby(by=["chr", "pos"], sort=False, as_index=False, dropna=False).count()[["chr", "pos", "count"]]
-        # divide each insertion site by the total reads on that chromosome
-        inserts_irl_df["CPM"] = inserts_irl_df.apply(lambda x: (x["count"] / irl_total_reads) * 1e5, axis=1)
-        inserts_irl_df["chrom_norm"] = inserts_irl_df.apply(lambda x: x["count"] / (irl_reads_per_chrom[x["chr"]]), axis=1)
-        inserts_irl_df["library"] = "IRL"
-        
-        # set transposon promoter orientation depending on sequencing library
-        # For IRR: + if forward, - if not. For IRL this is reversed. Also, make the orientations easier to read (+/-)
-        tmp_irl = tmp_irl.drop("count", axis=1)
-        tmp_irl["library"] = "IRL"
-        tmp_irl["tpn_promoter_orient"] = ~tmp_irl["tpn_promoter_orient"]
-        tmp_irl["strand"] = np.where(tmp_irl["strand"], "+", "-")
-        tmp_irl["tpn_promoter_orient"] = np.where(tmp_irl["tpn_promoter_orient"], "+", "-")
-        
-    tmp_irr, irr_reads_per_chrom = process_bam(irr_bam, mapq_thresh, verbose)
-    inserts_irr_df = None
-    if (tmp_irr is not None):
-        tmp_irr["count"] = 0
-        inserts_irr_df = tmp_irr.groupby(by=["chr", "pos"], sort=False, as_index=False, dropna=False).count()[["chr", "pos", "count"]]
-        inserts_irr_df["CPM"] = inserts_irr_df.apply(lambda x: (x["count"] / irr_total_reads) * 1e5, axis=1)
-        inserts_irr_df["chrom_norm"] = inserts_irr_df.apply(lambda x: x["count"] / (irr_reads_per_chrom[x["chr"]]), axis=1)
-        inserts_irr_df["library"] = "IRR"
-        
-        tmp_irr = tmp_irr.drop("count", axis=1)
-        tmp_irr["library"] = "IRR"
-        tmp_irr["strand"] = np.where(tmp_irr["strand"], "+", "-")
-        tmp_irr["tpn_promoter_orient"] = np.where(tmp_irr["tpn_promoter_orient"], "+", "-")
+    # IRR transposon orientation negative (against strand)
+    irr_bam_neg_orient = str(bam_dir / (sample_id + "_IRR.orient_neg.bam"))
+    irr_prefilter_neg_orient = str(bam_dir / (sample_id + "_IRR.prefiltering-orient_neg.bam"))
+    irr_neg_orient_total_reads = get_total_reads(irr_prefilter_neg_orient)
+    tmp_irr_neg_orient, irr_neg_orient_reads_per_chrom = process_bam(irr_bam_neg_orient)
+    individual_irr_neg_orient = process_individual_insertions('-', 'IRR', tmp_irr_neg_orient)
     
-    # concat of a dataframe and if check if any df is None
-    if inserts_irl_df is None and inserts_irr_df is None:
-        return
-    elif inserts_irl_df is None and inserts_irr_df is not None:
-        individual_inserts = tmp_irr
-        inserts_df = inserts_irr_df
-    elif inserts_irl_df is not None and inserts_irr_df is None:
-        individual_inserts = tmp_irl
-        inserts_df = inserts_irl_df
-    else:
-        inserts_df = pd.concat([inserts_irl_df, inserts_irr_df], ignore_index=True)
-        inserts_df["TCN"] = inserts_df.apply(lambda x: (x["count"] / (sum(irl_reads_per_chrom.values()) + sum(irr_reads_per_chrom.values()))), axis=1)
-        individual_inserts = pd.concat([tmp_irl, tmp_irr], ignore_index=True)
-
-
-    # # verify that insertions did not count both read1 and read2
-    # # do this by checking that the length of 'read names' is the same number as the length of unique read names
-    # read_names = inserts_df["read_name"].to_numpy()
-    # assert len(np.unique(read_names)) == len(read_names)
-
+    # remove same read names and return the new pos and neg orient dataframes for group_insertions
+    tmp_ind_irr_pos_orient, tmp_ind_irr_neg_orient = remove_same_read_name(individual_irr_pos_orient, individual_irr_neg_orient)
+    depth_irr_df_pos_orient, strand_irr_df_pos_orient = group_insertions(tmp_ind_irr_pos_orient, irr_pos_orient_total_reads, irr_pos_orient_reads_per_chrom)
+    depth_irr_df_neg_orient, strand_irr_df_neg_orient = group_insertions(tmp_ind_irr_neg_orient, irr_neg_orient_total_reads, irr_neg_orient_reads_per_chrom)
+    
+    
+    # combine library and transposon orientation dataframes
+    individual_df = pd.concat([tmp_ind_irl_pos_orient, tmp_ind_irl_neg_orient, tmp_ind_irr_pos_orient, tmp_ind_irr_neg_orient], ignore_index=True)
+    depth_df = pd.concat([depth_irl_df_pos_orient, strand_irl_df_pos_orient, depth_irr_df_pos_orient, strand_irr_df_pos_orient], ignore_index=True)
+    strand_df = pd.concat([depth_irl_df_neg_orient, strand_irl_df_neg_orient, depth_irr_df_neg_orient, strand_irr_df_neg_orient], ignore_index=True)
+    
     # sort by chr, then pos
-    inserts_df = inserts_df.sort_values(["chr", "pos"], ignore_index=True)
-    individual_inserts = individual_inserts.sort_values(["chr", "pos"], ignore_index=True)  # type: ignore
+    individual_df = sort_chrom_pos(individual_df, 'chr', 'pos')
+    depth_df = sort_chrom_pos(depth_df, 'chr', 'pos')
+    strand_df = sort_chrom_pos(strand_df, 'chr', 'pos')
     
-    # TODO: need to update input.tsv with meta info directly below
-    # add treatment group and sampleID
-    tmp_meta = mysample.split("-")
-    if len(tmp_meta) == 3:  # 2020 SB
-        inserts_df["treatment"] = tmp_meta[2]
-        inserts_df["sampleID"] = tmp_meta[1]
-        inserts_df["tumor_model"] = tmp_meta[0].strip("PD1")
-        inserts_df["pd1_treated"] = "PD1" in tmp_meta[0]
-        individual_inserts["treatment"] = tmp_meta[2]
-        individual_inserts["sampleID"] = tmp_meta[1]
-        individual_inserts["tumor_model"] = tmp_meta[0].strip("PD1")
-        individual_inserts["pd1_treated"] = "PD1" in tmp_meta[0]
-        
-    elif len(tmp_meta) == 2:  # 2023 SB
-        inserts_df["treatment"] = tmp_meta[0]
-        inserts_df["sampleID"] = tmp_meta[1]
-        individual_inserts["treatment"] = tmp_meta[0]
-        individual_inserts["sampleID"] = tmp_meta[1]
-        
-    else:  # TODO: gotta change input.tsv to hold extra meta info that I can add
-        sys.exit("meta data in mysample is not formmated correctly.")
+    # add sample_id, treatment group, and optional metadata
+    for i, col in enumerate(row.index):
+        if i >= 1 and i <=4:
+            continue
+        else:
+            individual_df[col] = row[col]
+            depth_df[col] = row[col]
+            strand_df[col] = row[col]
     
     # save insertions
-    inserts_df.to_csv(depth_dir / (mysample + ".tsv"), sep="\t", index=False)
-    individual_inserts.to_csv(insertions_dir / (mysample + ".tsv"), sep="\t", index=False)
+    individual_df.to_pickle(insertions_dir / (sample_id + ".pkl"))   # for insertions_to_bed.py
+    depth_df.to_pickle(depth_dir / (sample_id + ".pkl"))             # for pcis_networks.py
+    strand_df.to_pickle(strand_dir / (sample_id + ".pkl"))           # for a future version of NetCIS that uses strand and tpn orientation info pCIS
+
 
 def main() -> None:
     main_args = load_args()
-    files_df = pd.read_csv(main_args["input"], sep="\t", header=None)
-    iter_args = tqdm( [(row[1][0], main_args) for row in files_df.iterrows()] )
+    files_df = pd.read_csv(main_args["input"], sep="\t")
+    iter_args = [ (row[1], main_args) for row in files_df.iterrows() ]
+    if main_args['verbose']:
+        print("preprocess_insertions.py:")
+        iter_args = tqdm(iter_args)
+        
     with Pool(main_args["njobs"]) as p:
-        [ x for x in p.imap_unordered(process_bam_helper, iter_args) ]
+        [ x for x in p.imap_unordered(process_bam_helper, iter_args, chunksize=1) ]
         p.close()
 
+    if main_args['verbose']:
+        print()
+        
 if __name__ == "__main__":
     main()

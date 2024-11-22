@@ -20,6 +20,8 @@ def load_args() -> dict:
      -o, --output_prefix=DIR           a prefix of the output directory that will have "-CIS" appended to it
      -a, --case=STR                    treatment type value to use as case
      -b, --control=STR                 treatment type value to use as control
+     -t, --threshold=N                 maximum distance to connect two insertions together in the CIS network. We suggest not going over the default value [default: 50000]
+
      
     Options:
      -h, --help                        show this help message and exit
@@ -30,7 +32,7 @@ def load_args() -> dict:
     # remove "--" from args
     args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
 
-    int_opts = ["verbose", "njobs"]
+    int_opts = ["verbose", "njobs", "threshold"]
     for opts in int_opts:
         args[opts] = int(args[opts])
         
@@ -45,7 +47,7 @@ def load_args() -> dict:
     args["output"].mkdir(exist_ok=True)
         
     return args
-    
+ 
 def subgraph_properties(G):
     # Calculate properties of a subgraph.
 
@@ -101,56 +103,69 @@ def subgraph_stats(subgraphs, graph_type, chrom):
         return pd.DataFrame()
  
 def pcis_overlaps(case_df, control_df):
-    # Find overlaps between pCISs in the target DataFrame and reference DataFrame.
+    """
+    Find overlaps between pCISs in the target DataFrame and reference DataFrame.
+    """
     
     no_overlaps = []
     # cases overlapping with controls
     case_one_overlap = []
-    case_overlaps = []
+    case_multi_overlaps = []
     for ca in case_df.itertuples():
         overlap_list = []
         for co in control_df.itertuples():
-            if (ca.min_pos <= co.max_pos) and (ca.max_pos >= co.min_pos):
+            if (ca.min_pos <= co.max_pos) and (ca.max_pos >= co.min_pos):  # type: ignore
                 overlap_list.append(co.subgraph)
         if len(overlap_list) == 0:
-            no_overlaps.append( (ca.subgraph, np.nan) )
+            no_overlaps.append( ( ca.subgraph, np.nan ) )
         elif len(overlap_list) == 1:
-            case_one_overlap.append( (ca.subgraph, overlap_list[0]) )
+            case_one_overlap.append( ( ca.subgraph, overlap_list[0] ) )
         else:
-            case_overlaps.append( (ca.subgraph, overlap_list) )
-            
+            case_multi_overlaps.append( ( ca.subgraph, tuple(overlap_list) ) )
+    
     # controls overlapping with cases
     control_one_overlap = []
-    contol_overlaps = []
+    contol_multi_overlaps = []
     for co in control_df.itertuples():
         overlap_list = []
         for ca in case_df.itertuples():
-            if (co.min_pos <= ca.max_pos) and (co.max_pos >= ca.min_pos):
+            if (co.min_pos <= ca.max_pos) and (co.max_pos >= ca.min_pos):  # type: ignore
                 overlap_list.append(ca.subgraph)
         if len(overlap_list) == 0:
-            no_overlaps.append( (np.nan, co.subgraph) )
+            no_overlaps.append( ( np.nan, co.subgraph ) )
         elif len(overlap_list) == 1:
-            control_one_overlap.append( (overlap_list[0], co.subgraph) )
+            control_one_overlap.append( ( overlap_list[0], co.subgraph ) )
         else:
-            contol_overlaps.append( (overlap_list, co.subgraph) )
-            
-    # remove single overlaps in opposite cases/controls using the multiple overlaps
-    for overlap in contol_overlaps:
-        for ca in overlap[0]:
-            case_one_overlap.remove( (ca, overlap[1]) )
-            
-    for overlap in case_overlaps:
-        for co in overlap[1]:
-            control_one_overlap.remove( (overlap[0], co) )
+            contol_multi_overlaps.append( ( tuple(overlap_list), co.subgraph ) )
 
-    # now case and control one overlaps should be the same
-    assert sorted(case_one_overlap) == sorted(control_one_overlap)
+    # remove any duplicates using frozenset
+    single_overlaps = list(frozenset(case_one_overlap) | frozenset(control_one_overlap))
+    case_single_control_multi = list(frozenset(tuple(case_multi_overlaps)))
+    control_single_case_multi = list(frozenset(tuple(contol_multi_overlaps)))
+    
+    # check for overlap between the single and multi cases/controls
+    merged_multi = []
+    for i, (case, ctrl_multi) in enumerate(case_single_control_multi):
+        for j, (case_multi, ctrl) in enumerate(control_single_case_multi):
+            if case in case_multi:
+                new_case_multi = list(set([case] + list(case_multi)))
+                new_ctrl_multi = list(set([ctrl] + list(ctrl_multi)))
+                merged_multi.append( (new_case_multi, new_ctrl_multi) )
+                case_single_control_multi.pop(i)
+                control_single_case_multi.pop(j)
+                
+    for i, (case, ctrl_multi) in enumerate(case_single_control_multi):
+        for j, (case_multi, ctrl) in enumerate(control_single_case_multi):
+            if ctrl in ctrl_multi:
+                new_case_multi = list(set([case] + list(case_multi)))
+                new_ctrl_multi = list(set([ctrl] + list(ctrl_multi)))
+                merged_multi.append( (new_case_multi, new_ctrl_multi) )
+                case_single_control_multi.pop(i)
+                control_single_case_multi.pop(j)
 
     # join all non-overlapping, overlapping once, and overlapping multiple subgraphs into one dataframe to iterate through
     # these are the pseudo Common Insertion Sites
-    all_overlaps = no_overlaps + case_one_overlap
-    all_overlaps.extend(contol_overlaps)
-    all_overlaps.extend(case_overlaps)
+    all_overlaps = no_overlaps + single_overlaps + case_single_control_multi + control_single_case_multi + merged_multi
     return pd.DataFrame(all_overlaps, columns=["case", "control"], dtype="object")
 
 def pcis_to_cis_with_stats(overlap_df, case_chrom_subgraphs, control_chrom_subgraphs, case, control, num_cases, num_controls, chrom):
@@ -174,9 +189,55 @@ def pcis_to_cis_with_stats(overlap_df, case_chrom_subgraphs, control_chrom_subgr
     for overlap in overlap_df.itertuples():
         case_ind = overlap.case
         control_ind = overlap.control
+        
+        
+        # TODO: refactor this with functions to be neater and shorter?
+        
+        
+        # if multiple cases and multiple controls
+        if (type(case_ind) is list or type(case_ind) is tuple) and (type(control_ind) is list or type(control_ind) is tuple):
+            # get multiple cases
+            case_samples = set()
+            tmp_case_list = []
+            tmp_case_pos = []
+            for case_index in case_ind:
+                case_G = case_chrom_subgraphs[case_index]
+                case_position = [ case_G.nodes[node]['position'] for node in case_G.nodes ]
+                tmp_case_pos.extend(case_position)
+                tmp_case = pd.DataFrame([ {"case_count": case_G.nodes[node]['CPM']} for node in case_G.nodes ], index=case_position)
+                tmp_case["case_index"] = int(case_index)
+                tmp_case_list.append(tmp_case)
+                case_samples = case_samples.union({ x for y in [ case_G.nodes[node]["sample_IDs"] for node in case_G.nodes ] for x in y })
+            num_case_samples = len(case_samples)
+            tmp_cases = pd.concat(tmp_case_list, axis=0)
+            
+            # get multiple controls
+            control_samples = set()
+            tmp_control_list = []
+            tmp_control_pos = []
+            for control_index in control_ind:
+                control_G = control_chrom_subgraphs[control_index]
+                control_pos = [ control_G.nodes[node]['position'] for node in control_G.nodes ]
+                tmp_control_pos.extend(control_pos)
+                tmp_control = pd.DataFrame([ {"control_count": control_G.nodes[node]['CPM']} for node in control_G.nodes ], index=control_pos)
+                tmp_control["control_index"] = int(control_index)
+                tmp_control_list.append(tmp_control)
+                control_samples = control_samples.union({ x for y in [ control_G.nodes[node]["sample_IDs"] for node in control_G.nodes ] for x in y })
+            num_control_samples = len(control_samples)
+            tmp_controls = pd.concat(tmp_control_list, axis=0)
                 
+            tmp_IS = tmp_cases.join(tmp_controls, how="outer")
+                
+            case_pos_min = min(tmp_case_pos)
+            case_pos_max = max(tmp_case_pos)
+            control_pos_min = min(tmp_control_pos)
+            control_pos_max = max(tmp_control_pos)
+
+            case_IS = len(tmp_cases)
+            control_IS = len(tmp_controls)
+            
         # if multiple case 
-        if type(case_ind) is list:
+        elif type(case_ind) is list or type(case_ind) is tuple:
             # get single control
             control_G = control_chrom_subgraphs[control_ind]
             control_pos = [ control_G.nodes[node]['position'] for node in control_G.nodes ]
@@ -210,7 +271,7 @@ def pcis_to_cis_with_stats(overlap_df, case_chrom_subgraphs, control_chrom_subgr
             control_IS = len(tmp_control)
             
         # if mulitple control
-        elif type(control_ind) is list:
+        elif type(control_ind) is list or type(control_ind) is tuple:
             # get single case
             case_G = case_chrom_subgraphs[case_ind]
             case_pos = [ case_G.nodes[node]['position'] for node in case_G.nodes ]
@@ -382,7 +443,7 @@ def pcis_to_cis_with_stats(overlap_df, case_chrom_subgraphs, control_chrom_subgr
     CIS_df[cols1] = CIS_df[cols1].astype('float')
     cols2 = ['case_index', 'control_index']
     CIS_df[cols2] = CIS_df[cols2].astype('object')
-
+    
     return IS_df, CIS_df
 
 def run_per_chrom(iter_args):
@@ -418,17 +479,24 @@ def run_per_chrom(iter_args):
     
     return {"is": IS_df, "cis": CIS_df}
 
+
 def main(args):
-    case = args["case"]
-    control = args["control"]
+    case_group = args["case"]
+    control_group = args["control"]
     graph_dir = args["graph_dir"]
+    edge_threshold = args['threshold']
+    verbose = args["verbose"]
     
-    output_res = args["output"] / f"{case}-{control}"
+    output_res = args["output"] / f"{case_group}-{control_group}"
     output_res.mkdir(exist_ok=True)
+    
+    if verbose:
+        print('cis_networks.py')
+        print(f"\tCase: {case_group}, Control: {control_group}, Edge Threshold: {edge_threshold}")
 
     # bed_files = {file.name.split(".")[0]: file for file in args["ta_dir"].iterdir()}
    
-    chroms = sorted([ chrom.name for chrom in (graph_dir / case).iterdir() ])
+    chroms = sorted([ chrom.name for chrom in (graph_dir / case_group).iterdir() ])
     
     # don't allow more jobs than there are chromosomes
     jobs = args["njobs"]
@@ -438,7 +506,7 @@ def main(args):
         jobs = len(chroms)
             
     iter_args = [ (chrom, args) for chrom in chroms ]
-    if args["verbose"]:
+    if verbose:
         print("chrom\t# CIS")
     with Pool(args["njobs"]) as p:
         res_dict_list = [ x for x in p.imap_unordered(run_per_chrom, iter_args) ]
@@ -457,7 +525,10 @@ def main(args):
     #         new_CIS_list.append(cis)
     
     CIS_df = pd.concat(CIS_list, ignore_index=True)
-    CIS_df.to_csv(output_res / "CIS.tsv", sep="\t", index=False) 
+    CIS_df.to_csv(output_res / "CIS.tsv", sep="\t", index=False)
+    
+    if verbose:
+        print()
     
 if __name__ == "__main__": 
     main(load_args())

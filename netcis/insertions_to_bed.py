@@ -1,4 +1,3 @@
-import sys
 from pathlib import Path
 
 import pandas as pd
@@ -9,15 +8,13 @@ from docopt import docopt
 def load_args():
     doc = """  
     Usage: 
-        insertions_to_bed.py --output_prefix DIR --treatment STR [options]
+        insertions_to_bed.py --output_prefix DIR [options]
     
      -o, --output_prefix=DIR           a prefix of the output directory that will have "-analysis" appended to it
-     -t, --treatment=STR
 
     Options:
      -h, --help                        show this help message and exit
      -v, --verbose=N                   print more verbose information if available using 0, 1 or 2 [default: 0]
-
     """
 
     # remove "--" from args
@@ -32,58 +29,76 @@ def load_args():
         print("\n")
     
     args["insertion_dir"] = Path(args["output_prefix"] + "-insertions")
+    args["depth_dir"] = Path(args["output_prefix"] + "-insertions-depth")
+    args["strand_dir"] = Path(args["output_prefix"] + "-insertions-depth-strand")
     
     return args
-    
-def main(args):
-    insertion_dir = args["insertion_dir"]
-    treatment = args["treatment"]
-    # TODO: since we are going to be reading in meta files, this script should work without
-    # a given treatment arg and simply run for the treatment given in the meta file
-    insert_list = []
-    for file in tqdm(insertion_dir.iterdir()):
-        tmp_df = pd.read_csv(file, sep="\t")
-        tmp_meta = file.name.split(".")[0].split("-")
-        # TODO: this needs to be cleaned up and a better standard implemented.
-        # maybe a standardized meta-data file?
-        if len(tmp_meta) == 3:  # 2020 SB
-            tmp_df["treatment"] = tmp_meta[2]
-            tmp_df["sampleID"] = tmp_meta[1]
-            tmp_df["cell_type"] = tmp_meta[0]
-        elif len(tmp_meta) == 2:  # 2023 SB
-            tmp_df["treatment"] = tmp_meta[0]
-            tmp_df["sampleID"] = tmp_meta[1]
-            
-        tmp_df["sample_sub_id"] = range(len(tmp_df))
-        insert_list.append(tmp_df)
-    inserts_df = pd.concat(insert_list, ignore_index=True)
 
+
+def sort_chrom_pos(df, chrom, pos):
     key = {
         'chr1': 1, 'chr2': 2, 'chr3': 3, 'chr4': 4, 'chr5': 5, 
         'chr6': 6, 'chr7': 7, 'chr8': 8, 'chr9': 9, 'chr10': 10, 
         'chr11': 11,'chr12': 12, 'chr13': 13, 'chr14': 14, 'chr15': 15, 
         'chr16': 16, 'chr17': 17, 'chr18': 18, 'chr19': 19, 
-        'chrX': 20, 'chrY': 21,'chrM': 22}
+        'chrX': 20, 'chrY': 21,'chrM': 22,
+        }
+    df = df.copy(deep=True)
+    custom_sort_key = lambda x: x.map(key)
+    df['chrom_custom_sort'] = custom_sort_key(df[chrom])
+    df = df.sort_values(by=['chrom_custom_sort', pos], kind="timsort", ignore_index=True).drop(columns=['chrom_custom_sort'])
+    return df
+
+
+def main(args):
+    """Generate individual insertion bed files from insertion directory.
+
+    Args:
+        args (dict): input arguments from command line. See load_args() for details.
+    """
+    insertion_dir = args["insertion_dir"]   # for insertions_to_bed.py
+    depth_dir = args["depth_dir"]           # for pcis_networks.py
+    strand_dir = args["strand_dir"]         # for a future version of NetCIS that uses strand and tpn orientation info pCIS
+    verbose = args["verbose"]
+
+    if verbose:
+        print("insertions_to_bed.py")
+        print("Loading insertions from files...", end="")
+    insert_list = [ pd.read_pickle(file) for file in insertion_dir.iterdir()  ]
+    if verbose:
+        print("done")
+    inserts_df = pd.concat(insert_list, ignore_index=True)
+    # inserts_df.to_csv(insertion_dir.parent / f"all_insertions.tsv", sep="\t", index=False)
     
-    # bed
-    out2_df = pd.DataFrame(inserts_df["chr"])
-    out2_df.columns = ["chrom"]
-    out2_df["chromStart"] = inserts_df["pos"]-1  # 0-index based
-    out2_df["chromEnd"] = inserts_df["pos"]  # ending not inclusive
-    out2_df["name"] = inserts_df["treatment"]  # inserts_df["sampleID"] or "test"
-    out2_df["score"] = 1000
-    out2_df["strand"] = inserts_df["strand"]
-    out2_df["thickStart"] = out2_df["chromStart"]-1
-    out2_df["thickEnd"] = out2_df["chromStart"]
-    out2_df["itemRGB"] = "255,0,0"  # TODO: change color for insertion direction
-    # out2_df["blockCount"] = ""
-    # out2_df["blockSizes"] = ""
-    # out2_df["blockStart"] = ""
-    out2_df = out2_df[out2_df["name"] == treatment]
-    out2_df = out2_df.sort_values("chrom", key=lambda x: x.map(key)).sort_values("chromStart")
-    out2_df.to_csv(insertion_dir.parent / f"{treatment}.bed", sep="\t", index=False, header=False)
+    # add strand color to be used in bed file based on if the strand and transposon promoter orientation match
+    inserts_df["strand_color"] = ''
+    # color blind safe blue if they match
+    inserts_df.loc[inserts_df[inserts_df['strand'] == inserts_df['tpn_promoter_orient']].index, 'strand_color'] = "44,123,182"
+    # color blind safe red if they don't matched
+    inserts_df.loc[inserts_df[inserts_df['strand'] != inserts_df['tpn_promoter_orient']].index, 'strand_color'] = "215,25,28"
 
+    # save bed files for each treatment and strand
+    for treatment in inserts_df['treatment'].unique():
+        for strand in inserts_df['strand'].unique():
+            if verbose:
+                print(f"Creating bed file for treatment: {treatment}, and strand: {strand}")
+            treatment_strand_df = inserts_df[(inserts_df["treatment"] == treatment) & (inserts_df["strand"] == strand)]
+            treatment_strand_df = sort_chrom_pos(treatment_strand_df, 'chr', 'pos')
 
+            out_df = pd.DataFrame(treatment_strand_df["chr"])
+            out_df.columns = ["chrom"]
+            out_df["chromStart"] = inserts_df["pos"]-1  # 0-index based
+            out_df["chromEnd"] = inserts_df["pos"]  # ending not inclusive
+            out_df["name"] = ''  # inserts_df["treatment"]  # inserts_df["sampleID"]
+            out_df["score"] = 1000
+            out_df["strand"] = inserts_df["strand"]
+            out_df["thickStart"] = 0  # out_df["chromStart"]-1
+            out_df["thickEnd"] = 0  # out_df["chromStart"]
+            out_df["itemRGB"] = inserts_df["strand_color"]
+            out_df.to_csv(insertion_dir.parent / f"{treatment}_{strand}.bed", sep="\t", index=False, header=False)
+    if verbose:
+        print()
+        
 if __name__ == "__main__": 
     main(load_args())
     

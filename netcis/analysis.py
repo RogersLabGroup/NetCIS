@@ -1,5 +1,7 @@
-import ast, os, pickle
+import ast, os, pickle, sys
 from pathlib import Path
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 from docopt import docopt
 import pandas as pd
@@ -15,10 +17,6 @@ import matplotlib.pyplot as plt
 import seaborn.objects as so
 from seaborn import axes_style, plotting_context
 
-# # gseapy has some future warning that they have not fixed yet, so we prevent them from showing up with this
-# import warnings
-# warnings.simplefilter(action='ignore', category=FutureWarning)
-
 
 def load_args() -> dict:
     doc = """
@@ -32,6 +30,8 @@ def load_args() -> dict:
      -b, --control=STR                  treatment type value to use as control
      -g, --annotation=FILE              MGI's mouse menetic markers excluding withdrawn genes
      -s, --gene_sets=FILE               Pathway gene sets as a gmt file
+     -t, --threshold=N                  maximum distance to connect two insertions together in the CIS network. We suggest not going over the default value [default: 50000]
+
 
     Options:
      -h, --help                         show this help message and exit
@@ -43,12 +43,11 @@ def load_args() -> dict:
      -n, --num_cis=N                    and integer number of top ranked CIS to create genome viewer plots for. [default: 20]
      -j, --sim_thresh=N                 theshold for the Jaccard distance used in removing redundant pathways for gene set enrichment [default: 0.5]
     """
-    # TODO: download gene sets MSigDB gmt files for analysis. Prepare this in the input directory
     
     # remove "--" from args
     args = { key.split("-")[-1]: value for key, value in docopt(doc).items() }
         
-    int_opts = ["marker_expander", "verbose", 'num_cis']
+    int_opts = ["marker_expander", "verbose", 'num_cis', "threshold"]
     for opts in int_opts:
         args[opts] = int(args[opts])
     
@@ -66,8 +65,22 @@ def load_args() -> dict:
     args["annotation"] = Path(args["annotation"])
     args["output"] = Path(args["output_prefix"] + "-analysis") / f"{args['case']}-{args['control']}"
     args["output"].mkdir(exist_ok=True, parents=True)
-    
+
     return args
+
+def sort_chrom_pos(df, chrom, pos):
+    key = {
+        'chr1': 1, 'chr2': 2, 'chr3': 3, 'chr4': 4, 'chr5': 5, 
+        'chr6': 6, 'chr7': 7, 'chr8': 8, 'chr9': 9, 'chr10': 10, 
+        'chr11': 11,'chr12': 12, 'chr13': 13, 'chr14': 14, 'chr15': 15, 
+        'chr16': 16, 'chr17': 17, 'chr18': 18, 'chr19': 19, 
+        'chrX': 20, 'chrY': 21,'chrM': 22,
+        }
+    df = df.copy(deep=True)
+    custom_sort_key = lambda x: x.map(key)
+    df['chrom_custom_sort'] = custom_sort_key(df[chrom])
+    df = df.sort_values(by=['chrom_custom_sort', pos], kind="mergesort", ignore_index=True).drop(columns=['chrom_custom_sort'])
+    return df
 
 def cast_indexes(df):
     # some of the indexes are a string representation of a list and require casting to list type
@@ -91,7 +104,6 @@ def process_annot_file(df, marker_type, feature_type, verbose=0):
     # remove unused column
     df = df.drop("Status", axis=1)
     # remove genes that are heritable phenotypic markers to NaN
-    # TODO: need a more flexible way to choose marker and feature types with exclusion and inclusion params
     df = df[df['Feature Type'] != 'heritable phenotypic marker']
     # transform Chr column into "chr1" format and sort by Chr
     df["chrom"] = df["Chr"].apply(lambda x: f"chr{x}")
@@ -205,15 +217,92 @@ def plot_volcanoes(data_df, pval_threshold, case_group, control_group, output):
     fig.savefig(output /"volcano_plots.png")
     plt.close()
     
+def edit_tracks_config(track_file):
+    """
+        sometimes the variables are commented
+        sometimes they need to be uncommented and changed
+        or just changed
+        this will do all of that
+    """
+    # why comment out parts if you give it a true or false? just make it false...
+    # or just make this into JSON and use that. It's way better for a config file.
+    # Looks like the maintainers of pyGenomeTracks will change to something better in version 4.0 (next update)
+
+    vars_to_change = {
+        # 'title': None,  # make it shorter
+        'labels': 'labels = true',  # change to true
+        # 'style': 'UCSC',  # uncomment
+        'all_labels_inside': 'all_labels_inside = true',  # uncomment to true
+        'labels_in_margin': 'labels_in_margin = true',  # uncomment to true
+        # 'merge_transcripts': 'true',  # uncomment to true
+        # 'merge_overlapping_exons': 'true',  # uncomment to true
+        }
+
+    with open(track_file) as f:
+        lines = f.readlines()
+
+    header = None
+    out_lines = []
+    for line in lines:
+        # remove leading and trailing white space 
+        line_clean = line.strip()
+        new_line = line_clean
+        
+        # skip empty lines
+        if line_clean == "":
+            out_lines.append(new_line)
+            continue
+        
+        # check if line is a header - this tells us what config we are editing
+        if line_clean[0] == '[':
+            header = line_clean.strip('[').strip(']')
+            
+        # check if line is a variable
+        if line_clean.find("=") != -1:
+            
+            # get just the variable by removing comments and whitespace
+            curr_var = line_clean.strip('#').split('=')[0].strip()
+            
+            # check if the current variable is in the variables to change dictionary
+            if curr_var in vars_to_change:
+                # print(header, curr_var)
+                new_line = vars_to_change[curr_var]
+                
+                # # for special case of style
+                # if curr_var == 'style':
+                #     if line_clean.find("UCSC") != -1:
+                #         new_line = line_clean.strip('#')
+                # else:
+                #     new_line = vars_to_change[curr_var]
+                    
+        # if new_line != line_clean:
+        #     print(new_line, line_clean)
+            
+        out_lines.append(new_line)
+        
+    with open(track_file, 'w') as f:
+        f.write('\n'.join(out_lines))
+
+def edit_pyGV_file_names(pyGT_dir, top_df):
+    for row in top_df.itertuples():
+        file_name: Path = pyGT_dir / f'test_{row.chrom}-{row.CIS_start}-{row.CIS_end}.png'
+        is_annot = 'unannot' if not row.genes else 'annot'
+        new_name = pyGT_dir / f'{row.rank:03}-{is_annot}-{row.chrom}:{row.CIS_start}-{row.CIS_end}.png'
+        if not file_name.is_file():
+            print(f"error: file not found\n\t{file_name}")
+        else:
+            file_name.rename(new_name)
+
 def get_dist(m, i, j):
     # The metric dist(u=X[i], v=X[j]) is computed and stored in a condensed array whose entry is i < j < m
     # see scipy documentation for pdist for more info
     return m * i + j - ((i + 2) * (i + 1)) // 2
 
 def prepare_gene_set(gene_set_file, gene_set_output, sim_thres, verbose):
-    
     # it can be time consuming removing redundant pathways so if the gene sets are already made then skip this step
     if (gene_set_output / 'final_gene_sets.pkl').is_file():
+        if verbose:
+            print('gene-set files already exist. Loading...')
         with open(gene_set_output / 'gene_sets.pkl', 'rb') as file1: 
             gene_sets = pickle.load(file1)
         with open(gene_set_output / 'filtered_gene_sets.pkl', 'rb') as file2: 
@@ -247,8 +336,6 @@ def prepare_gene_set(gene_set_file, gene_set_output, sim_thres, verbose):
         print(f"filtered gene-set count: {len(filtered_gene_sets)}")
 
 
-
-
     # remove redundant pathways with jaccard distance (dissimilarity) < 0.5
     # the more similar two arrays are the closer to 0 they will be
     # the more distant they are then the closer to 1 they will be
@@ -266,6 +353,7 @@ def prepare_gene_set(gene_set_file, gene_set_output, sim_thres, verbose):
 
     if verbose:
         print('Beginning to remove redundant pathways. This may take a while...', end='')
+        sys.stdout.flush()
     # append pathway index if it is the first pathway found to be more similar than the threshold 0.5
     dm2 = pairwise_distances(p_g_df.astype(bool).to_numpy(), metric='jaccard', n_jobs=-1)
     dm = squareform(dm2)
@@ -312,19 +400,18 @@ def run_gse(candidate_df, treatment, gene_sets, background, output, verbose):
     res_df.to_csv(output / f"enrichr-results-{treatment}.tsv", sep='\t')
     
     # dot plot
-    # TODO: can't use "Adjusted P-value" cause none are significant
-    ax_dot = gp.dotplot(res_df, column="P-value", size=6, top_term=10, figsize=(6,8), title = f"Enrichement: {treatment}", cmap="viridis_r")
+    ax_dot = gp.dotplot(res_df, column="Adjusted P-value", size=6, top_term=10, figsize=(6,8), title = f"Enrichement: {treatment}", cmap="viridis_r")
     # plt.tight_layout()
     plt.savefig(output / f"enrichr-dotplot-{treatment}.png")
     plt.savefig(output / f"enrichr-dotplot-{treatment}.pdf")
     plt.savefig(output / f"enrichr-dotplot-{treatment}.svg")
     plt.close()
         
-    
+        
         
     # build graph
     # TODO: can't use "Adjusted P-value" cause none are significant
-    nodes, edges = gp.enrichment_map(res_df, column="P-value", top_term=20)
+    nodes, edges = gp.enrichment_map(res_df, column="Adjusted P-value", top_term=20)
     G = nx.from_pandas_edgelist(edges, source='src_idx', target='targ_idx', edge_attr=['jaccard_coef', 'overlap_coef', 'overlap_genes'])
 
     # Add missing node if there is any
@@ -371,88 +458,8 @@ def run_gse(candidate_df, treatment, gene_sets, background, output, verbose):
     
     # save to GraphML format if someone wants to use Cytoscape
     nx.write_graphml(G, output / f'{treatment}.graphml')
-
-def edit_tracks_config(track_file):
-    # TODO: figure out the final version of the tracks.ini file that I need to make it look good
-    """
-        sometimes the variables are commented
-        sometimes they need to be uncommented and changed
-        or just changed
-        this will do all of that
-    """
-    # why comment out parts if you give it a true or false? just make it false...
-    # or just make this into JSON and use that. It's way better for a config file.
-    # might want to make an issue on the github repo to change this?
-
-    vars_to_change = {
-        # 'title': None,  # make it shorter
-        'labels': 'labels = true',  # change to true
-        # 'style': 'UCSC',  # uncomment
-        'all_labels_inside': 'all_labels_inside = true',  # uncomment to true
-        'labels_in_margin': 'labels_in_margin = true',  # uncomment to true
-        # 'merge_transcripts': 'true',  # uncomment to true
-        # 'merge_overlapping_exons': 'true',  # uncomment to true
-        }
-
-    with open(track_file) as f:
-        lines = f.readlines()
-
-    header = None
-    out_lines = []
-    for line in lines:
-        # remove leading and trailing white space 
-        line_clean = line.strip()
-        new_line = line_clean
-        
-        # skip empty lines
-        if line_clean == "":
-            out_lines.append(new_line)
-            continue
-        
-        # check if line is a header - this tells us what config we are editing
-        if line_clean[0] == '[':
-            header = line_clean.strip('[').strip(']')
-            
-        # if we are in the annotation configs
-        if (header is not None) and (header[-4:] == '.gtf'):
-            
-            # check if line is a variable
-            if line_clean.find("=") != -1:
-                
-                # get just the variable by removing comments and whitespace
-                curr_var = line_clean.strip('#').split('=')[0].strip()
-                
-                # check if the current variable is in the variables to change dictionary
-                if curr_var in vars_to_change:
-                    
-                    new_line = vars_to_change[curr_var]
-                    
-                    # # for special case of style
-                    # if curr_var == 'style':
-                    #     if line_clean.find("UCSC") != -1:
-                    #         new_line = line_clean.strip('#')
-                    # else:
-                    #     new_line = vars_to_change[curr_var]
-                    
-        # if new_line != line_clean:
-        #     print(new_line, line_clean)
-            
-        out_lines.append(new_line)
-        
-    with open(track_file, 'w') as f:
-        f.write('\n'.join(out_lines))
-
-def edit_pyGV_file_names(pyGV_dir, top_df):
-    for row in top_df.itertuples():
-        file_name = pyGV_dir / f'test_{row.chrom}-{row.CIS_start}-{row.CIS_end}.png'
-        is_annot = 'unannot' if not row.genes else 'annot'
-        new_name = pyGV_dir / f'{row.rank:03}-{is_annot}-{row.chrom}-{row.CIS_start}-{row.CIS_end}.png'
-        if not file_name.is_file():
-            print(f"error: file not found {pyGV_dir / file_name}")
-        else:
-            file_name.rename(new_name)
-
-
+    
+    
 def main(args):
     cis_dir: Path = args["CIS_dir"]
     output: Path = args["output"]
@@ -460,6 +467,7 @@ def main(args):
     control_group = args['control']
     annotation_file: Path = args["annotation"]
     gene_set_file = args['gene_sets']
+    edge_threshold = args['threshold']
 
     verbose = args["verbose"]
     pval_threshold = args['pval_threshold']
@@ -469,6 +477,9 @@ def main(args):
     num_cis = args['num_cis']
     sim_thresh = args['sim_thresh']
     
+    if verbose:
+        print('analysis.py')
+        print(f"\tCase: {case_group}, Control: {control_group}, Edge Threshold: {edge_threshold}")
 
     # load in files
     # IS_df = pd.read_csv(cis_dir / "IS.tsv", sep="\t")
@@ -479,7 +490,6 @@ def main(args):
     # process results and annotation fileargs
     data_df = cast_indexes(CIS_df)
     # data_df = filter_low_read_CIS(data_df, verbose)
-    # TODO: make faster somehow
     data_df["genes"] = annotate_cis(data_df, annot_df, marker_expander)
     # remove G-protein genes cause...there's a lot?
     data_df["genes"] = data_df["genes"].apply(lambda x: remove_Gm(x))
@@ -562,94 +572,69 @@ def main(args):
     run_gse(candidate_df, control_group, final_gene_sets, background_gene_list, control_output, verbose)
 
 
-
-
-    ######## pyGenomeViewer genomic tracks
-    
-    # TODO: use this for pyGenomeViewer?
+    # pyGenomeViewer genomic tracks
     # genome tracks: convert MGI .rpt file to .bed file
-    # BED
     bed_df = pd.DataFrame(annot_df["chrom"])
     bed_df["chromStart"] = annot_df["genome coordinate start"]-1
     bed_df["chromEnd"] = annot_df["genome coordinate end"]
     bed_df["name"] = annot_df["Marker Symbol"]
     bed_df["score"] = 1000
     bed_df["strand"] = annot_df["strand"].fillna(".")
-    # bed_df["thickStart"] = annot_df["genome coordinate start"]-1
-    # bed_df["thickEnd"] = annot_df["genome coordinate end"]
-    # bed_df["itemRGB"] = "255,255,255"
-    bed_df.to_csv(output/ "MRK_List2.bed", sep="\t", index=False, header=False)
-    # TODO: move back into 2020_SB output directory?
+    bed_df.to_csv(output.parent.parent / "MRK_List2.bed", sep="\t", index=False, header=False)
 
 
+    # TODO: the number of insertions (CPM) isn't shown, just the insertion site. How should I portray this?
+    # maybe with color intensity?
 
-    # TODO: the number of insertions isn't shown, just the insertion site. How should I portray this?
     # make bed file for each region to plot in pyGenomeViewer for candidate genes and for top CIS
-    top_CIS_bed_file = output / "top_CIS-pyGV.bed"
-    top_CIS = data_df.sort_values('rank').iloc[:num_cis].copy()
+    pyGT_helper = output / "pyGT_helper"
+    pyGT_helper.mkdir(exist_ok=True, parents=True)
+    top_CIS_bed_file = pyGT_helper / "top_CIS.bed"
+
+    # sort bed file
+    top_CIS = data_df.sort_values('rank').iloc[:num_cis].copy(deep=True)
+    top_CIS = sort_chrom_pos(top_CIS, "chrom", "CIS_start")
+
+    # change CIS start and CIS end to reflect the marker expander
     top_CIS["CIS_start"] = top_CIS["CIS_start"] - marker_expander
     top_CIS["CIS_end"] = top_CIS["CIS_end"] + marker_expander
 
+    # make bed file
     top_CIS_bed = pd.DataFrame(top_CIS["chrom"])
     top_CIS_bed["chromStart"] = top_CIS["CIS_start"]
     top_CIS_bed["chromEnd"] = top_CIS["CIS_end"]
-    top_CIS_bed["name"] = top_CIS['genes'].apply(lambda x: "_".join(x))  # TODO: change this to CPM?
+    top_CIS_bed["name"] = top_CIS['genes'].apply(lambda x: " | ".join(x))
     top_CIS_bed["score"] = 1000
     top_CIS_bed["strand"] = "."  # TODO: add strand specificity?
+    top_CIS_bed["thickStart"] = top_CIS["CIS_start"]
+    top_CIS_bed["thickEnd"] = top_CIS["CIS_end"]
+    top_CIS_bed["itemRGB"] = ""  # "255,255,255"
     top_CIS_bed.to_csv(top_CIS_bed_file, sep="\t", index=False, header=False)
 
-    # prepare directories for pyGenomeViewer results
-    pyGV_CIS = output / "pyGV_top_CIS"
-    pyGV_CIS.mkdir(exist_ok=True, parents=True)
 
-    # get bed files programatically - file annotation.gtf.gz should be in the same high level result directory
-    # TODO: maybe make a bed file from the rpt file and use that? Or do they supply one already?
-    bed_files_list = []
+    # prepare directories for pyGenomeTracks results
+    pyGT_CIS = output / "pyGT_top_CIS"
+    pyGT_CIS.mkdir(exist_ok=True, parents=True)
+
+    # get bed case and control bed file and gene annotation file made above for pyGenomeTracks
+    bed_files_keep = [case_group, control_group, annotation_file.stem]
+    bed_files_list = bed_files_keep
+
     for file in output.parent.parent.iterdir():
-        if file.is_file():
-            bed_files_list.append(str(file))
-            
-    bed_files_list = [
-        'output/2020_SB/LT.bed',
-        'output/2020_SB/RT.bed',
-        'output/2020_SB/S.bed',
-        'output/2020_SB/MRK_List2.bed',
-        # 'output/2020_SB/gencode.vM35.annotation.gtf.gz',
-        ]
+        if file.is_file() and file.stem in bed_files_keep:
+            ind = bed_files_keep.index(file.stem)
+            bed_files_list[ind] = str(file)
     track_files = " ".join(bed_files_list)
 
-    track_out = output / "tracks.ini"
+    print()
+    print("making genome tracks config file")
+    track_out = pyGT_helper / "tracks.ini"
+    os.system(f"make_tracks_file --trackFiles {track_files} -o {track_out} > /dev/null 2>&1")
+    edit_tracks_config(track_out)
 
-    # TODO: need a better way to make the tracks config file
-    # print("make genome track config file")
-    # os.system(f"make_tracks_file --trackFiles {track_files} -o {track_out} > /dev/null")
-
-    # print("edit config file")
-    # edit_tracks_config(track_out)
-
-
-    # make genomic track images
-    print('make genome track plots')
-    os.system(f"pyGenomeTracks --tracks {track_out} --BED {top_CIS_bed_file} --outFileName {pyGV_CIS / 'test.png'} > /dev/null 2>&1")
-    # run2 = f"pyGenomeTracks --tracks {track_out} --BED {top_genes_bed_file} --outFileName {pyGV_genes / 'test.png'} > /dev/null 2>&1"
-    # run3 = f"pyGenomeTracks --tracks {track_out} --BED {top_unannot_bed_file} --outFileName {pyGV_unannot / 'test.png'} > /dev/null 2>&1"
-    # processes = [ subprocess.Popen(program, shell=True) for program in [run1, run2, run3] ]
-    # for process in processes:
-    #     process.wait()
-
-
-    # go through png files and rename to relative ranks or genes
-    print('editing genome track file names')
-    edit_pyGV_file_names(pyGV_CIS, top_CIS)
-
-
-
-
-
-
-
-
-
+    print('making genome track plots')
+    os.system(f"pyGenomeTracks --tracks {track_out} --BED {top_CIS_bed_file} --outFileName {pyGT_CIS / 'test.png'} > /dev/null 2>&1")
+    edit_pyGV_file_names(pyGT_CIS, top_CIS)
 
 if __name__ == "__main__":
     main(load_args())

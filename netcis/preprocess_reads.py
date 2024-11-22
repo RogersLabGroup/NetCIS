@@ -1,4 +1,4 @@
-import sys, os
+import sys, subprocess, time
 from pathlib import Path
 from multiprocessing import Pool
 
@@ -30,6 +30,7 @@ def load_args() -> dict:
      -v, --verbose=N                    print more verbose information if available using 0, 1 or 2 [default: 0]
      -t, --ntask=INT                    number of threads to use that will speed up cutadapt, bowtie2, and samtools [default: 1]
      -n, --npara=INT                    number of parallel processes to process multiple files at the same time [default: 1]
+     -q, --mapq=INT                     minimum mapping quality score to keep reads [default: 13]   
     """
 
     # remove "--" from args
@@ -66,38 +67,125 @@ def load_args() -> dict:
     
     return args
 
-def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, ntask, genome_index_dir, report_output) -> None:
-    """Process forward and reverse reads: trim transposon and primer, map reads, save to bam file"""
-    tpn_c = tpn.complement()
-    primer_c = primer.complement()
+def timeit(func):
+    """
+    Decorator for measuring function's running time.
+    https://stackoverflow.com/questions/35656239/how-do-i-time-script-execution-time-in-pycharm-without-adding-code-every-time
     
-    trim1_f = mysample_file.with_name("trim1-" + read_f.name)
-    trim1_r = mysample_file.with_name("trim1-" + read_r.name)
-    pre_bam_file = mysample_file.with_suffix(".prefiltering.bam")
-    bam_file = mysample_file.with_suffix(".bam")
-    
-    cutadapt_report = mysample_file.with_suffix(".cutadapt.txt").name
-    bowtie_report = mysample_file.with_suffix(".bowtie.txt").name
-    bam_report = mysample_file.with_suffix(".idxstats.txt").name
-    
-    # trim reads: for an explanation on trimming Illumina paired-end transposon reads see https://github.com/marcelm/cutadapt/issues/711 
-    cutadapt = f"cutadapt -j {ntask} --discard-untrimmed -a {tpn}...{primer} -A {primer_c}...{tpn_c} -o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report} 2> /dev/null"
+    @utils.timeit
+    def func():
+        pass
+    """
+    def measure_time(*args, **kw):
+        start = time.time()
+        result = func(*args, **kw)
+        end = time.time()
+        print(f"Processing time of {func.__qualname__}(): {int((end - start) // 60)} min {round((end - start) % 60, 4)} sec")
+        return result
 
+    return measure_time
+
+def run_command(command):
+    result = subprocess.run(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode != 0:
+        print(f"Error in command: {command}")
+        print(result.stderr.decode())
+    return result
+
+def run_preprocessing(cutadapt, ntask, genome_index_dir, trim1_f, trim1_r, pre_bam_file, bowtie_report, bam_file, bam_report, report_output):
+    # trim reads
+    res_cutadapt = run_command(cutadapt)
+    
     # map reads
-    mapper = f"bowtie2 -p {ntask} --very-sensitive-local --local -x {genome_index_dir} -1 {trim1_f} -2 {trim1_r} -S {pre_bam_file} 2> {report_output / bowtie_report}"
+    mapper = f"bowtie2 -p {ntask} --very-sensitive-local --local -x {genome_index_dir} -1 {trim1_f} -2 {trim1_r}"
+    mapper2 = f"samtools view -h -@ {ntask} -b - > {pre_bam_file} 2> {report_output / bowtie_report}"
+    res_bowtie = run_command(f"{mapper} | {mapper2}")
     
     # filter reads
-    sam_sort = f"samtools sort -@ {ntask} -o {pre_bam_file} {pre_bam_file} > /dev/null 2>&1"
-    sam_filter = f"samtools view -h -@ {ntask} -f 3 -1 -o {bam_file} {pre_bam_file}"
+    sam_sort = f"samtools sort -@ {ntask} -o {pre_bam_file} {pre_bam_file}"
+    # sam_filter = f"samtools view -h -@ {ntask} -f 3 -1 -o {bam_file} {pre_bam_file}"
+    sam_filter = f"samtools view -h -@ {ntask} -q 13 -f 67 -F 12 -1 -o {bam_file} {pre_bam_file}"
     sam_index = f"samtools index -@ {ntask} {bam_file}"
     sam_index2 = f"samtools index -@ {ntask} {pre_bam_file}"
     sam_stats = f"samtools idxstats {bam_file} > {report_output / bam_report}"
-    
-    os.system(f"{cutadapt}; {mapper}; {sam_sort}; {sam_filter}; {sam_index}; {sam_index2}; {sam_stats}")
-    os.system(f"rm {trim1_f} {trim1_r}")  # {pre_bam_file}
-    
+    rm_files = f"rm {trim1_f} {trim1_r}"
+    res_idxstats = run_command(f"{sam_sort} ; {sam_filter} ; {sam_index} ; {sam_index2} ; {sam_stats} ; {rm_files}")
+                   
     sys.stdout.flush()
     sys.stderr.flush()
+    
+    assert (res_cutadapt.returncode == 0), f"Error in cutadapt\n\n{res_cutadapt.stderr}"
+    assert (res_bowtie.returncode == 0), f"Error in bowtie\n\n{res_bowtie.stderr}"
+    assert (res_idxstats.returncode == 0), f"Error in idxstats\n\n{res_idxstats.stderr}"
+
+def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, library, ntask, genome_index_dir, report_output):
+    """Process forward and reverse reads: trim transposon and primer, map reads, save to bam file"""
+
+    trim1_f_orient_pos = mysample_file.with_name("trim1-orient_pos-" + read_f.name)
+    trim1_r_orient_pos = mysample_file.with_name("trim1-orient_pos-" + read_r.name)
+    cutadapt_report_orient_pos = mysample_file.with_suffix(".cutadapt-orient_pos.txt").name
+    
+    pre_bam_file_orient_pos = mysample_file.with_suffix(".prefiltering-orient_pos.bam")
+    bowtie_report_orient_pos = mysample_file.with_suffix(".bowtie-orient_pos.txt").name
+    
+    bam_file_orient_pos = mysample_file.with_suffix(".orient_pos.bam")
+    bam_report_orient_pos = mysample_file.with_suffix(".idxstats-orient_pos.txt").name
+    
+    
+    trim1_f_orient_neg = mysample_file.with_name("trim1-orient_neg-" + read_f.name)
+    trim1_r_orient_neg = mysample_file.with_name("trim1-orient_neg-" + read_r.name)
+    cutadapt_report_orient_neg = mysample_file.with_suffix(".cutadapt-orient_neg.txt").name
+    
+    pre_bam_file_orient_neg = mysample_file.with_suffix(".prefiltering-orient_neg.bam")
+    bowtie_report_orient_neg = mysample_file.with_suffix(".bowtie-orient_neg.txt").name
+    
+    bam_file_orient_neg = mysample_file.with_suffix(".orient_neg.bam")
+    bam_report_orient_neg = mysample_file.with_suffix(".idxstats-orient_neg.txt").name
+
+    # v3
+    if library == "IRL":
+        # IRL and tpn in forward orientation with strand
+        cutadapt_orient_pos = (
+            f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
+            f"-g ^{primer} -a {tpn} -G ^{tpn.reverse_complement()} -A {primer.reverse_complement()} "
+            f"-o {trim1_f_orient_pos} -p {trim1_r_orient_pos} {read_f} {read_r} > {report_output / cutadapt_report_orient_pos}"
+        )
+        # IRL and tpn in reverse orientation against strand
+        cutadapt_orient_neg = (
+            f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
+            f"-g ^{tpn.reverse_complement()} -a {primer.reverse_complement()} -G ^{primer} -A {tpn} "
+            f"-o {trim1_f_orient_neg} -p {trim1_r_orient_neg} {read_f} {read_r} > {report_output / cutadapt_report_orient_neg}"
+        )
+    else:  # IRR
+        # IRR and tpn in forward orientation with strand
+        cutadapt_orient_pos = (
+            f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
+            f"-g ^{tpn} -a {primer} -G ^{primer.reverse_complement()} -A {tpn.reverse_complement()} "
+            f"-o {trim1_f_orient_pos} -p {trim1_r_orient_pos} {read_f} {read_r} > {report_output / cutadapt_report_orient_pos}"
+        )
+        
+        # IRR and tpn in reverse orientation against strand
+        cutadapt_orient_neg = (
+            f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
+            f"-g ^{primer.reverse_complement()} -a {tpn.reverse_complement()} -G ^{tpn} -A {primer} "
+            f"-o {trim1_f_orient_neg} -p {trim1_r_orient_neg} {read_f} {read_r} > {report_output / cutadapt_report_orient_neg}"
+        )
+    
+    # positive orientation
+    run_preprocessing(
+        cutadapt_orient_pos,
+        ntask, genome_index_dir, trim1_f_orient_pos, trim1_r_orient_pos, pre_bam_file_orient_pos, bowtie_report_orient_pos, 
+        bam_file_orient_pos, bam_report_orient_pos,
+        report_output,
+        )
+    
+    # negative orientation
+    run_preprocessing(
+        cutadapt_orient_neg,
+        ntask, genome_index_dir, trim1_f_orient_neg, trim1_r_orient_neg, pre_bam_file_orient_neg, bowtie_report_orient_neg, 
+        bam_file_orient_neg, bam_report_orient_neg,
+        report_output,
+        )
 
 def preprocess_read_helper(iter_args) -> None:
     """helper function for multiprocessing of preprocess_reads()"""
@@ -112,21 +200,26 @@ def preprocess_read_helper(iter_args) -> None:
     primer = args["primer"]
     report_output_dir = args["report_output"]
     
-    mysample = row[0]
-    irl_F = data_dir / row[1]
-    irl_R = data_dir / row[2]
+    mysample = row.iloc[0]
+    irl_F = data_dir / row.iloc[1]
+    irl_R = data_dir / row.iloc[2]
     irl_file = bam_output_dir / (mysample + "_IRL")
-    preprocess_reads(irl_tpn, primer, irl_F, irl_R, irl_file, ntask, genome_index_dir, report_output_dir)
+    preprocess_reads(irl_tpn, primer, irl_F, irl_R, irl_file, 'IRL', ntask, genome_index_dir, report_output_dir)
     
-    irr_F = data_dir / row[3]
-    irr_R = data_dir / row[4]
+    irr_F = data_dir / row.iloc[3]
+    irr_R = data_dir / row.iloc[4]
     irr_file = bam_output_dir / (mysample + "_IRR")
-    preprocess_reads(irr_tpn, primer, irr_F, irr_R, irr_file, ntask, genome_index_dir, report_output_dir)
+    preprocess_reads(irr_tpn, primer, irr_F, irr_R, irr_file, 'IRR', ntask, genome_index_dir, report_output_dir)
 
+        
 def main() -> None:
     main_args = load_args()
-    files_df = pd.read_csv(main_args["input"], sep="\t", header=None)
-    iter_args = tqdm([ (row[1], main_args) for row in files_df.iterrows() ])
+    files_df = pd.read_csv(main_args["input"], sep="\t")
+    iter_args = [ (row[1], main_args) for row in files_df.iterrows() ]
+    if main_args['verbose']:
+        print("preprocess_reads.py:")
+        iter_args = tqdm(iter_args)
+
     with Pool(main_args["npara"]) as p:
         [ x for x in p.imap_unordered(preprocess_read_helper, iter_args, chunksize=1) ]
         p.close()

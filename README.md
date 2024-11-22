@@ -3,6 +3,13 @@
 
 Network based Common Insertional Site analysis
 
+## Requirements
+
+- It is assummed that the SB screen has been prepared as per LM-PCR protocol [TODO: link] and the fastq files are have IRL/IRR libraries and are sequenced with Illumina's short-read paired-end technology.
+- Compute environment
+  - NetCIS has only been tested on Linux TODO:
+- Computer with enough storage space for fastq files and generated intermediate and result files
+
 ## Clone from github
 
 [Github Repo](https://github.com/FischyM/NetCIS)
@@ -14,13 +21,11 @@ git clone git@github.com:FischyM/NetCIS.git
 ## Create python environment
 
 ```bash
-conda create -n netcis -c bioconda -c conda-forge python=3.11 numpy pandas scipy networkx seaborn docopt jupyterlab tqdm Biopython gseapy pygenometracks pysam
+conda create -n netcis -c bioconda -c conda-forge python=3.11 numpy pandas scipy networkx seaborn docopt jupyterlab tqdm Biopython gseapy pygenometracks pysam cutadapt, bowtie2, and samtools
 conda activate netcis
 ```
 
 Jupyterlab is optional and can be installed as needed.
-
-You will also need cutadapt, bowtie2, and samtools to be accesible from the command line.
 
 ## Prepare data
 
@@ -31,23 +36,25 @@ Data should be fastq files directly from sequencing. Preprocessing of the data h
 - process insertions
 - save individual insertions per fastq file
 
-## File Structure
+## Input files
 
-TODO:
-
-- input file for preprocess reads
-  - columns are sample name. irl r1, irl r2, irr r1, irr r2
-  - sample name should be formatted as <treatment>-<id> and only uses one dash ("-")
-- chrom mapper file for preprocess insertions
+- fastq files
+  - can be obtained from TODO:
+- input file of fastq files
+  - the following columns are sample_id, IRL_read1, IRL_read2, IRR_read1, IRR_read2, treatment, optional_columns, etc
+    - first 6 columns are required
+    - sample_id MUST be unique and does not need to be meaningful
+    - optional_columns allows you to add any extra columns and they will propagate throughout NetCIS. For example, we have added tumor_model and pd1_treated
+- reference mapping file for bowtie2
+  - we have created our own GRCm39 reference mapping file with conventional contig names (chr1, chr2, etc.) and it can be obtained from our Zenodo repository TODO:
   - GRCm39 <https://www.ncbi.nlm.nih.gov/assembly/GCF_000001635.27/>
   - <https://genome.ucsc.edu/cgi-bin/hgTracks?chromInfoPage=&hgsid=1560703641_1YwiSDzyFEZ8nuDrTobTnwtYvReT>
 - gene annotation <https://www.informatics.jax.org/genes.shtml> 7/10/2023
-  - <https://www.informatics.jax.org/downloads/reports/MRK_List1.rpt>
   - <https://www.informatics.jax.org/downloads/reports/MRK_List2.rpt>
 
 ## Limitations
 
-It is assummed that the SB screen data has IRL/IRR libraries and paired reads.
+
 
 ## Other Preprocessing Things
 
