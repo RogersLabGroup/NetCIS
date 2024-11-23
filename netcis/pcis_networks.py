@@ -188,6 +188,7 @@ def create_graph_generator(chrom_list, treatment_inserts, treatment_dir, args):
         yield ( treatment_chrom_inserts, treatment_chrom_dir, args["threshold"], args["verbose"] )
 
 def main(args) -> None:
+    edge_threshold = args["threshold"]
     verbose = args["verbose"]
     
     # get all files in data dir, load each file as pandas.DataFrame
@@ -211,7 +212,7 @@ def main(args) -> None:
             print(treatment)
             
         # prepare output
-        out_dir = args['output'] / treatment
+        out_dir = args['output'] / treatment / str(edge_threshold)
         out_dir.mkdir(parents=True, exist_ok=True)
         
         treatment_df = inserts_df[inserts_df["treatment"] == treatment]

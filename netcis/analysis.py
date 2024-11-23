@@ -61,12 +61,35 @@ def load_args() -> dict:
             print(f"\t{key}: {item}")
         print("\n")
         
-    args["CIS_dir"] = Path(args["output_prefix"] + "-CIS") / f"{args['case']}-{args['control']}"
+    args["CIS_dir"] = Path(args["output_prefix"] + "-CIS") / f"{args['case']}-{args['control']}" / f"{args['threshold']}"
     args["annotation"] = Path(args["annotation"])
-    args["output"] = Path(args["output_prefix"] + "-analysis") / f"{args['case']}-{args['control']}"
+    args["output"] = Path(args["output_prefix"] + "-analysis") / f"{args['case']}-{args['control']}" / f"{args['threshold']}"
     args["output"].mkdir(exist_ok=True, parents=True)
 
     return args
+
+import ast, os, pickle, sys
+from pathlib import Path
+
+import pandas as pd
+import numpy as np
+from scipy.stats import false_discovery_control
+from scipy.spatial.distance import squareform
+from sklearn.metrics.pairwise import pairwise_distances
+import ranky as rk
+import networkx as nx
+import gseapy as gp
+
+import matplotlib.pyplot as plt
+from matplotlib import cm
+import matplotlib.colors as mcolors
+import seaborn.objects as so
+from seaborn import axes_style, plotting_context
+
+from IPython.display import display
+
+# import warnings
+# warnings.simplefilter(action='ignore', category=FutureWarning)
 
 def sort_chrom_pos(df, chrom, pos):
     key = {
@@ -79,7 +102,7 @@ def sort_chrom_pos(df, chrom, pos):
     df = df.copy(deep=True)
     custom_sort_key = lambda x: x.map(key)
     df['chrom_custom_sort'] = custom_sort_key(df[chrom])
-    df = df.sort_values(by=['chrom_custom_sort', pos], kind="mergesort", ignore_index=True).drop(columns=['chrom_custom_sort'])
+    df = df.sort_values(by=['chrom_custom_sort', pos], ignore_index=True).drop(columns=['chrom_custom_sort'])
     return df
 
 def cast_indexes(df):
@@ -98,12 +121,12 @@ def cast_indexes(df):
 
 def process_annot_file(df, marker_type, feature_type, verbose=0):
     # preprocess annotation file
-    
     # remove genomic features that don't have a genome coordinate start
     df = df[pd.notna(df["genome coordinate start"])]
     # remove unused column
     df = df.drop("Status", axis=1)
     # remove genes that are heritable phenotypic markers to NaN
+    # TODO: need a more flexible way to choose marker and feature types with exclusion and inclusion params
     df = df[df['Feature Type'] != 'heritable phenotypic marker']
     # transform Chr column into "chr1" format and sort by Chr
     df["chrom"] = df["Chr"].apply(lambda x: f"chr{x}")
@@ -121,8 +144,8 @@ def process_annot_file(df, marker_type, feature_type, verbose=0):
 
     if verbose:
         print(f"\nnumber of possible annotation: {len(df)}")
-        
-    df = df.sort_values(["Chr", "genome coordinate start"])
+    
+    df = sort_chrom_pos(df, "chrom", "genome coordinate start")
     df["genome coordinate start"] = df["genome coordinate start"].apply(int)
     df["genome coordinate end"] = df["genome coordinate end"].apply(int)
     # TODO: what about the strand in annot_df? Does this need to be considered for a CIS by separating by strand?
@@ -134,15 +157,13 @@ def annotate_cis(cis_df, annot_df, marker_expander):
     pos_max = cis_df[["case_pos_max", "control_pos_max"]].max(axis=1).to_numpy().reshape(-1, 1)
     cis_chrom = cis_df[["chrom"]].to_numpy().reshape(-1, 1)
 
+    # add marker expander to both ends of the gene irregardless of strand
     marker_start = (annot_df["genome coordinate start"] - marker_expander).to_numpy().reshape(1, -1)
     marker_end = (annot_df["genome coordinate end"] + marker_expander).to_numpy().reshape(1, -1)
     marker_chrom = annot_df["chrom"].to_numpy().reshape(1, -1)
 
     tmp = (pos_min <= marker_end) & (pos_max >= marker_start) & (cis_chrom == marker_chrom)
     return [ list(annot_df["Marker Symbol"][tmp[i]]) for i in range(tmp.shape[0]) ]
-
-def gene_search(df, gene_search):
-    return df[df["genes"] == gene_search]
 
 def remove_Gm(gene_list):
     genes_out = []
@@ -153,10 +174,6 @@ def remove_Gm(gene_list):
             genes_out.append(gene)
     return genes_out
 
-def quantile_selection(df, column, quant):
-    quant_rank = df[column].quantile(quant)
-    return df[df[column] < quant_rank].sort_values(column)
-
 def volcano_plot(df, pval, pval_thresh, lfc_thresh, title=""):
     data = df.copy(deep=True)
     thres = np.log10(pval_thresh) * -1
@@ -166,7 +183,7 @@ def volcano_plot(df, pval, pval_thresh, lfc_thresh, title=""):
         # .add(so.Dots(), so.Jitter(1))
         .add(so.Dots(color="grey"), data=data.query(f"{pval} < {thres}"))
         .add(so.Dots(color="blue"), data=data.query(f"{pval} >= {thres}"))
-        .scale(y="log")
+        .scale(y="log")  # type: ignore
         .label(title=title)
     )
     return g
@@ -179,8 +196,8 @@ def matplot_volcano(ax, df, pval, pval_thresh, lfc_thresh, case, control, title=
     down = df[ (df['LFC'] <= -lfc_thresh) & (df[pval] <= pval_thresh) ]
     up = df[ (df['LFC'] >= lfc_thresh) & (df[pval] <= pval_thresh) ]
 
-    ax.scatter(x=down['LFC'], y=down[pval].apply(lambda x: -np.log10(x)), s=10, label=f"{case} < {control}", color="blue")
-    ax.scatter(x=up['LFC'], y=up[pval].apply(lambda x: -np.log10(x)), s=10, label=f"{case} > {control}", color="gold")
+    ax.scatter(x=down['LFC'], y=down[pval].apply(lambda x: -np.log10(x)), s=10, label=f"{control}", color="blue")
+    ax.scatter(x=up['LFC'], y=up[pval].apply(lambda x: -np.log10(x)), s=10, label=f"{case}", color="gold")
 
     if add_text:
         texts_up=[]
@@ -202,9 +219,9 @@ def matplot_volcano(ax, df, pval, pval_thresh, lfc_thresh, case, control, title=
     # else:
         # ax.axvline(lfc_thresh, color="grey", linestyle="--")
     ax.axhline(-np.log10(pval_thresh), color="grey", linestyle="--")
-    ax.legend()
+    ax.legend(title="Enrichment")
 
-def plot_volcanoes(data_df, pval_threshold, case_group, control_group, output):
+def plot_volcanoes(data_df, pval_threshold, case_group, control_group, output, return_fig=False):
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 12))
     matplot_volcano(ax1, data_df, "ranksums", pval_threshold, 0, case_group, control_group, title="Rank-sum uncorrected")
     matplot_volcano(ax2, data_df, "ranksums-BY", pval_threshold, 0, case_group, control_group, title="Rank-sum corrected")
@@ -215,7 +232,10 @@ def plot_volcanoes(data_df, pval_threshold, case_group, control_group, output):
     fig.savefig(output /"volcano_plots.pdf")
     fig.savefig(output /"volcano_plots.svg")
     fig.savefig(output /"volcano_plots.png")
-    plt.close()
+    if return_fig:
+        return fig
+    else:
+        plt.close()
     
 def edit_tracks_config(track_file):
     """
@@ -292,6 +312,7 @@ def edit_pyGV_file_names(pyGT_dir, top_df):
             print(f"error: file not found\n\t{file_name}")
         else:
             file_name.rename(new_name)
+
 
 def get_dist(m, i, j):
     # The metric dist(u=X[i], v=X[j]) is computed and stored in a condensed array whose entry is i < j < m
@@ -410,7 +431,6 @@ def run_gse(candidate_df, treatment, gene_sets, background, output, verbose):
         
         
     # build graph
-    # TODO: can't use "Adjusted P-value" cause none are significant
     nodes, edges = gp.enrichment_map(res_df, column="Adjusted P-value", top_term=20)
     G = nx.from_pandas_edgelist(edges, source='src_idx', target='targ_idx', edge_attr=['jaccard_coef', 'overlap_coef', 'overlap_genes'])
 
@@ -534,7 +554,6 @@ def main(args):
     volcano_output = output / "volcano_plots"
     volcano_output.mkdir(exist_ok=True, parents=True)
     plot_volcanoes(data_df, pval_threshold, case_group, control_group, volcano_output)
-    
 
     # Gene-set enrichment
     # candidate CIS: select the union of sig. rank sum and fisher exact results for our candidates
@@ -573,6 +592,8 @@ def main(args):
 
 
     # pyGenomeViewer genomic tracks
+    main_res_dir = output.parent.parent.parent
+
     # genome tracks: convert MGI .rpt file to .bed file
     bed_df = pd.DataFrame(annot_df["chrom"])
     bed_df["chromStart"] = annot_df["genome coordinate start"]-1
@@ -580,7 +601,7 @@ def main(args):
     bed_df["name"] = annot_df["Marker Symbol"]
     bed_df["score"] = 1000
     bed_df["strand"] = annot_df["strand"].fillna(".")
-    bed_df.to_csv(output.parent.parent / "MRK_List2.bed", sep="\t", index=False, header=False)
+    bed_df.to_csv(main_res_dir / "MRK_List2.bed", sep="\t", index=False, header=False)
 
 
     # TODO: the number of insertions (CPM) isn't shown, just the insertion site. How should I portray this?
@@ -617,10 +638,12 @@ def main(args):
     pyGT_CIS.mkdir(exist_ok=True, parents=True)
 
     # get bed case and control bed file and gene annotation file made above for pyGenomeTracks
-    bed_files_keep = [case_group, control_group, annotation_file.stem]
+    bed_files_keep = [f"{case_group}_+", f"{case_group}_-", 
+                    f"{control_group}_+", f"{control_group}_-", 
+                    annotation_file.stem]
     bed_files_list = bed_files_keep
 
-    for file in output.parent.parent.iterdir():
+    for file in main_res_dir.iterdir():
         if file.is_file() and file.stem in bed_files_keep:
             ind = bed_files_keep.index(file.stem)
             bed_files_list[ind] = str(file)
@@ -635,6 +658,7 @@ def main(args):
     print('making genome track plots')
     os.system(f"pyGenomeTracks --tracks {track_out} --BED {top_CIS_bed_file} --outFileName {pyGT_CIS / 'test.png'} > /dev/null 2>&1")
     edit_pyGV_file_names(pyGT_CIS, top_CIS)
+    print()
 
 if __name__ == "__main__":
     main(load_args())

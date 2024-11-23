@@ -451,13 +451,14 @@ def run_per_chrom(iter_args):
     graph_dir = args["graph_dir"]
     case = args["case"]
     control = args["control"]
+    edge_threshold = args["threshold"]
     verbose = args["verbose"]
     
-    with open(graph_dir / case / chrom / "subgraphs.pickle", 'rb') as f:
+    with open(graph_dir / case / str(edge_threshold) / chrom / "subgraphs.pickle", 'rb') as f:
         case_chrom_subgraphs = pickle.load(f)
     case_chrom_df = subgraph_stats(case_chrom_subgraphs, case, chrom)
     
-    with open(graph_dir / control / chrom / "subgraphs.pickle", 'rb') as f:
+    with open(graph_dir / control / str(edge_threshold) / chrom / "subgraphs.pickle", 'rb') as f:
         control_chrom_subgraphs = pickle.load(f)
     control_chrom_df = subgraph_stats(control_chrom_subgraphs, control, chrom)
     
@@ -487,8 +488,8 @@ def main(args):
     edge_threshold = args['threshold']
     verbose = args["verbose"]
     
-    output_res = args["output"] / f"{case_group}-{control_group}"
-    output_res.mkdir(exist_ok=True)
+    output_res = args["output"] / f"{case_group}-{control_group}" / str(edge_threshold)
+    output_res.mkdir(exist_ok=True, parents=True)
     
     if verbose:
         print('cis_networks.py')
@@ -496,7 +497,7 @@ def main(args):
 
     # bed_files = {file.name.split(".")[0]: file for file in args["ta_dir"].iterdir()}
    
-    chroms = sorted([ chrom.name for chrom in (graph_dir / case_group).iterdir() ])
+    chroms = sorted([ chrom.name for chrom in (graph_dir / case_group / str(edge_threshold)).iterdir() ])
     
     # don't allow more jobs than there are chromosomes
     jobs = args["njobs"]
