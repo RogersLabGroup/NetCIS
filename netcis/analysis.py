@@ -399,12 +399,12 @@ def run_gse(candidate_df, treatment, gene_sets, background, output, verbose):
     # dot plot
     
     try:
-        ax_dot: Axes | None = gp.dotplot(res_df, column="Adjusted P-value", size=6, top_term=10, figsize=(6,8), title = f"Enrichement: {treatment}", cmap="viridis_r")
-        if ax_dot is not None:
-            ax_dot.savefig(output / f"enrichr-dotplot-{treatment}.png")
-            ax_dot.savefig(output / f"enrichr-dotplot-{treatment}.pdf")
-            ax_dot.savefig(output / f"enrichr-dotplot-{treatment}.svg")
-            plt.close()
+        fig1, ax1 = plt.subplots(figsize=(8, 8))
+        gp.dotplot(res_df, column="Adjusted P-value", size=6, top_term=10, figsize=(6,8), title = f"Enrichement: {treatment}", cmap="viridis_r", ax=ax1)
+        fig1.savefig(output / f"enrichr-dotplot-{treatment}.png")
+        fig1.savefig(output / f"enrichr-dotplot-{treatment}.pdf")
+        fig1.savefig(output / f"enrichr-dotplot-{treatment}.svg")
+        plt.close()
     except Exception as e:
         print(f"Error in gp.dotplot()\n\t{e}/n")
         
@@ -420,7 +420,7 @@ def run_gse(candidate_df, treatment, gene_sets, background, output, verbose):
             if node not in G.nodes():
                 G.add_node(node)
                 
-        fig, ax_graph = plt.subplots(figsize=(8, 8))
+        fig2, ax2 = plt.subplots(figsize=(8, 8))
 
         # init node cooridnates
         # pos=nx.layout.shell_layout(G)
@@ -429,9 +429,9 @@ def run_gse(candidate_df, treatment, gene_sets, background, output, verbose):
         # draw nodes
         node_size = list(nodes.Hits_ratio*1000)
         node_color = list(nodes['P-value'])
-        net_nodes = nx.draw_networkx_nodes(G, pos=pos, cmap='RdYlBu', node_color=node_color, node_size=node_size, ax=ax_graph)
+        net_nodes = nx.draw_networkx_nodes(G, pos=pos, cmap='RdYlBu', node_color=node_color, node_size=node_size, ax=ax2)
         # make legends
-        legend1 = ax_graph.legend(
+        legend1 = ax2.legend(
             *net_nodes.legend_elements("sizes", num=4),
             loc="upper right",
             title="Hits ratio\n* 1000",
@@ -439,29 +439,29 @@ def run_gse(candidate_df, treatment, gene_sets, background, output, verbose):
             borderpad=1,
             labelspacing=2.5,
             )
-        ax_graph.add_artist(legend1)
-        legend2 = ax_graph.legend(*net_nodes.legend_elements("colors"), loc="lower right", title="P-value", bbox_to_anchor=(1.15, 0))
+        ax2.add_artist(legend1)
+        legend2 = ax2.legend(*net_nodes.legend_elements("colors"), loc="lower right", title="P-value", bbox_to_anchor=(1.15, 0))
 
         # draw node labels
         labels = nodes.Term.to_dict()
-        nx.draw_networkx_labels(G, pos=pos, labels=labels, font_size=8, ax=ax_graph)
+        nx.draw_networkx_labels(G, pos=pos, labels=labels, font_size=8, ax=ax2)
 
         # draw edges
         edge_weight = nx.get_edge_attributes(G, 'jaccard_coef').values()
         width = list(map(lambda x: x*10, edge_weight))
-        nx.draw_networkx_edges(G, pos=pos, width=width, edge_color='#CDDBD4', ax=ax_graph)
+        nx.draw_networkx_edges(G, pos=pos, width=width, edge_color='#CDDBD4', ax=ax2)
         plt.tight_layout()
         
-        fig.savefig(output / f"enrichr-netowrk-{treatment}.png")
-        fig.savefig(output / f"enrichr-netowrk-{treatment}.pdf")
-        fig.savefig(output / f"enrichr-netowrk-{treatment}.svg")
+        fig2.savefig(output / f"enrichr-netowrk-{treatment}.png")
+        fig2.savefig(output / f"enrichr-netowrk-{treatment}.pdf")
+        fig2.savefig(output / f"enrichr-netowrk-{treatment}.svg")
         plt.close()
         
         # save to GraphML format if someone wants to use Cytoscape
         nx.write_graphml(G, output / f'{treatment}.graphml')
         
     except Exception as e:
-        print(f"Error in gp.enrichment_map()\n\t\n{e}")
+        print(f"Error in gp.enrichment_map()\n\t{e}\n")
     
     
 def main(args):
@@ -641,6 +641,7 @@ def main(args):
     print('making genome track plots')
     os.system(f"pyGenomeTracks --tracks {track_out} --BED {top_CIS_bed_file} --outFileName {pyGT_CIS / 'test.png'} > /dev/null 2>&1")
     edit_pyGV_file_names(pyGT_CIS, top_CIS)
+    print()
     print()
 
 if __name__ == "__main__":
