@@ -67,24 +67,6 @@ def load_args() -> dict:
     
     return args
 
-def timeit(func):
-    """
-    Decorator for measuring function's running time.
-    https://stackoverflow.com/questions/35656239/how-do-i-time-script-execution-time-in-pycharm-without-adding-code-every-time
-    
-    @utils.timeit
-    def func():
-        pass
-    """
-    def measure_time(*args, **kw):
-        start = time.time()
-        result = func(*args, **kw)
-        end = time.time()
-        print(f"Processing time of {func.__qualname__}(): {int((end - start) // 60)} min {round((end - start) % 60, 4)} sec")
-        return result
-
-    return measure_time
-
 def run_command(command):
     result = subprocess.run(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if result.returncode != 0:
@@ -118,7 +100,7 @@ def run_preprocessing(cutadapt, ntask, genome_index_dir, trim1_f, trim1_r, pre_b
     assert (res_bowtie.returncode == 0), f"Error in bowtie\n\n{res_bowtie.stderr}"
     assert (res_idxstats.returncode == 0), f"Error in idxstats\n\n{res_idxstats.stderr}"
 
-def preprocess_reads(tpn, primer, read_f, read_r, mysample_file, library, ntask, genome_index_dir, report_output):
+def preprocess_reads(tpn: Seq, primer: Seq, read_f: Path, read_r: Path, mysample_file: str, library: str, ntask, genome_index_dir, report_output):
     """Process forward and reverse reads: trim transposon and primer, map reads, save to bam file"""
 
     trim1_f_orient_pos = mysample_file.with_name("trim1-orient_pos-" + read_f.name)

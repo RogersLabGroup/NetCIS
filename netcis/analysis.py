@@ -1,7 +1,5 @@
 import ast, os, pickle, sys
 from pathlib import Path
-import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
 
 from docopt import docopt
 import pandas as pd
@@ -14,6 +12,7 @@ import networkx as nx
 import gseapy as gp
 
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 import seaborn.objects as so
 from seaborn import axes_style, plotting_context
 
@@ -67,29 +66,6 @@ def load_args() -> dict:
     args["output"].mkdir(exist_ok=True, parents=True)
 
     return args
-
-import ast, os, pickle, sys
-from pathlib import Path
-
-import pandas as pd
-import numpy as np
-from scipy.stats import false_discovery_control
-from scipy.spatial.distance import squareform
-from sklearn.metrics.pairwise import pairwise_distances
-import ranky as rk
-import networkx as nx
-import gseapy as gp
-
-import matplotlib.pyplot as plt
-from matplotlib import cm
-import matplotlib.colors as mcolors
-import seaborn.objects as so
-from seaborn import axes_style, plotting_context
-
-from IPython.display import display
-
-# import warnings
-# warnings.simplefilter(action='ignore', category=FutureWarning)
 
 def sort_chrom_pos(df, chrom, pos):
     key = {
@@ -421,63 +397,71 @@ def run_gse(candidate_df, treatment, gene_sets, background, output, verbose):
     res_df.to_csv(output / f"enrichr-results-{treatment}.tsv", sep='\t')
     
     # dot plot
-    ax_dot = gp.dotplot(res_df, column="Adjusted P-value", size=6, top_term=10, figsize=(6,8), title = f"Enrichement: {treatment}", cmap="viridis_r")
-    # plt.tight_layout()
-    plt.savefig(output / f"enrichr-dotplot-{treatment}.png")
-    plt.savefig(output / f"enrichr-dotplot-{treatment}.pdf")
-    plt.savefig(output / f"enrichr-dotplot-{treatment}.svg")
-    plt.close()
+    
+    try:
+        ax_dot: Axes | None = gp.dotplot(res_df, column="Adjusted P-value", size=6, top_term=10, figsize=(6,8), title = f"Enrichement: {treatment}", cmap="viridis_r")
+        if ax_dot is not None:
+            ax_dot.savefig(output / f"enrichr-dotplot-{treatment}.png")
+            ax_dot.savefig(output / f"enrichr-dotplot-{treatment}.pdf")
+            ax_dot.savefig(output / f"enrichr-dotplot-{treatment}.svg")
+            plt.close()
+    except Exception as e:
+        print(f"Error in gp.dotplot()\n\t{e}/n")
         
         
         
     # build graph
-    nodes, edges = gp.enrichment_map(res_df, column="Adjusted P-value", top_term=20)
-    G = nx.from_pandas_edgelist(edges, source='src_idx', target='targ_idx', edge_attr=['jaccard_coef', 'overlap_coef', 'overlap_genes'])
+    try:
+        nodes, edges = gp.enrichment_map(res_df, column="Adjusted P-value", top_term=20)
+        G = nx.from_pandas_edgelist(edges, source='src_idx', target='targ_idx', edge_attr=['jaccard_coef', 'overlap_coef', 'overlap_genes'])
 
-    # Add missing node if there is any
-    for node in nodes.index:
-        if node not in G.nodes():
-            G.add_node(node)
-            
-    fig, ax_graph = plt.subplots(figsize=(8, 8))
+        # Add missing node if there is any
+        for node in nodes.index:
+            if node not in G.nodes():
+                G.add_node(node)
+                
+        fig, ax_graph = plt.subplots(figsize=(8, 8))
 
-    # init node cooridnates
-    # pos=nx.layout.shell_layout(G)
-    pos=nx.layout.kamada_kawai_layout(G)
+        # init node cooridnates
+        # pos=nx.layout.shell_layout(G)
+        pos=nx.layout.kamada_kawai_layout(G)
 
-    # draw nodes
-    node_size = list(nodes.Hits_ratio*1000)
-    node_color = list(nodes['P-value'])
-    net_nodes = nx.draw_networkx_nodes(G, pos=pos, cmap='RdYlBu', node_color=node_color, node_size=node_size, ax=ax_graph)
-    # make legends
-    legend1 = ax_graph.legend(
-        *net_nodes.legend_elements("sizes", num=4),
-        loc="upper right",
-        title="Hits ratio\n* 1000",
-        bbox_to_anchor=(1.16, 1),
-        borderpad=1,
-        labelspacing=2.5,
-        )
-    ax_graph.add_artist(legend1)
-    legend2 = ax_graph.legend(*net_nodes.legend_elements("colors"), loc="lower right", title="P-value", bbox_to_anchor=(1.15, 0))
+        # draw nodes
+        node_size = list(nodes.Hits_ratio*1000)
+        node_color = list(nodes['P-value'])
+        net_nodes = nx.draw_networkx_nodes(G, pos=pos, cmap='RdYlBu', node_color=node_color, node_size=node_size, ax=ax_graph)
+        # make legends
+        legend1 = ax_graph.legend(
+            *net_nodes.legend_elements("sizes", num=4),
+            loc="upper right",
+            title="Hits ratio\n* 1000",
+            bbox_to_anchor=(1.16, 1),
+            borderpad=1,
+            labelspacing=2.5,
+            )
+        ax_graph.add_artist(legend1)
+        legend2 = ax_graph.legend(*net_nodes.legend_elements("colors"), loc="lower right", title="P-value", bbox_to_anchor=(1.15, 0))
 
-    # draw node labels
-    labels = nodes.Term.to_dict()
-    nx.draw_networkx_labels(G, pos=pos, labels=labels, font_size=8, ax=ax_graph)
+        # draw node labels
+        labels = nodes.Term.to_dict()
+        nx.draw_networkx_labels(G, pos=pos, labels=labels, font_size=8, ax=ax_graph)
 
-    # draw edges
-    edge_weight = nx.get_edge_attributes(G, 'jaccard_coef').values()
-    width = list(map(lambda x: x*10, edge_weight))
-    nx.draw_networkx_edges(G, pos=pos, width=width, edge_color='#CDDBD4', ax=ax_graph)
-    plt.tight_layout()
-    
-    fig.savefig(output / f"enrichr-netowrk-{treatment}.png")
-    fig.savefig(output / f"enrichr-netowrk-{treatment}.pdf")
-    fig.savefig(output / f"enrichr-netowrk-{treatment}.svg")
-    plt.close()
-    
-    # save to GraphML format if someone wants to use Cytoscape
-    nx.write_graphml(G, output / f'{treatment}.graphml')
+        # draw edges
+        edge_weight = nx.get_edge_attributes(G, 'jaccard_coef').values()
+        width = list(map(lambda x: x*10, edge_weight))
+        nx.draw_networkx_edges(G, pos=pos, width=width, edge_color='#CDDBD4', ax=ax_graph)
+        plt.tight_layout()
+        
+        fig.savefig(output / f"enrichr-netowrk-{treatment}.png")
+        fig.savefig(output / f"enrichr-netowrk-{treatment}.pdf")
+        fig.savefig(output / f"enrichr-netowrk-{treatment}.svg")
+        plt.close()
+        
+        # save to GraphML format if someone wants to use Cytoscape
+        nx.write_graphml(G, output / f'{treatment}.graphml')
+        
+    except Exception as e:
+        print(f"Error in gp.enrichment_map()\n\t\n{e}")
     
     
 def main(args):
@@ -574,7 +558,8 @@ def main(args):
         print(f"number of background genes: {len(background_gene_list)}\n")
 
     # prepare gene sets
-    gene_set_output = output / "processed_gene_sets"
+    main_res_dir = output.parent.parent.parent
+    gene_set_output = main_res_dir / "processed_gene_sets"
     gene_set_output.mkdir(exist_ok=True, parents=True)
     gene_sets, filtered_gene_sets, final_gene_sets = prepare_gene_set(gene_set_file, gene_set_output, sim_thresh, verbose)
     # NOTE: it is suggested to use the final_gene_sets, as these are pathway that have been filtered for gene size
@@ -592,8 +577,6 @@ def main(args):
 
 
     # pyGenomeViewer genomic tracks
-    main_res_dir = output.parent.parent.parent
-
     # genome tracks: convert MGI .rpt file to .bed file
     bed_df = pd.DataFrame(annot_df["chrom"])
     bed_df["chromStart"] = annot_df["genome coordinate start"]-1
