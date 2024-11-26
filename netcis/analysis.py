@@ -516,7 +516,7 @@ def main(args):
         data_df["binomial-BY-neglog"] = -np.log10(data_df["binomial-BY"])
 
     # rank CIS by rank aggregation
-    rankers = data_df[['ranksums-neglog', 'fishers_exact-neglog', 'total_read_count', 'total_num_samples']]
+    rankers = data_df[['ranksums-neglog', 'total_read_count', 'total_num_samples']]
     data_df['rank'] = rk.rank(rk.borda(rankers, method='median'), reverse=True)        
         
     # CIS enrichment
