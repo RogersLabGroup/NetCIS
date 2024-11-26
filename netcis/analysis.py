@@ -102,7 +102,6 @@ def process_annot_file(df, marker_type, feature_type, verbose=0):
     # remove unused column
     df = df.drop("Status", axis=1)
     # remove genes that are heritable phenotypic markers to NaN
-    # TODO: need a more flexible way to choose marker and feature types with exclusion and inclusion params
     df = df[df['Feature Type'] != 'heritable phenotypic marker']
     # transform Chr column into "chr1" format and sort by Chr
     df["chrom"] = df["Chr"].apply(lambda x: f"chr{x}")
@@ -124,7 +123,8 @@ def process_annot_file(df, marker_type, feature_type, verbose=0):
     df = sort_chrom_pos(df, "chrom", "genome coordinate start")
     df["genome coordinate start"] = df["genome coordinate start"].apply(int)
     df["genome coordinate end"] = df["genome coordinate end"].apply(int)
-    # TODO: what about the strand in annot_df? Does this need to be considered for a CIS by separating by strand?
+    # NOTE: for next version
+    # what about the strand in annot_df? Does this need to be considered for a CIS by separating by strand?
     return df
 
 def annotate_cis(cis_df, annot_df, marker_expander):
@@ -295,16 +295,17 @@ def get_dist(m, i, j):
     # see scipy documentation for pdist for more info
     return m * i + j - ((i + 2) * (i + 1)) // 2
 
-def prepare_gene_set(gene_set_file, gene_set_output, sim_thres, verbose):
+def prepare_gene_set(gene_set_file, gene_set_output, sim_thresh=0.5, verbose=False):
     # it can be time consuming removing redundant pathways so if the gene sets are already made then skip this step
-    if (gene_set_output / 'final_gene_sets.pkl').is_file():
+    final_gene_set_name = f'final_gene_sets-sim_{sim_thresh}.pkl'
+    if (gene_set_output / final_gene_set_name).is_file():
         if verbose:
             print('gene-set files already exist. Loading...')
         with open(gene_set_output / 'gene_sets.pkl', 'rb') as file1: 
             gene_sets = pickle.load(file1)
         with open(gene_set_output / 'filtered_gene_sets.pkl', 'rb') as file2: 
             filtered_gene_sets = pickle.load(file2)
-        with open(gene_set_output / 'final_gene_sets.pkl', 'rb') as file3: 
+        with open(gene_set_output / final_gene_set_name, 'rb') as file3: 
             final_gene_sets = pickle.load(file3)
         if verbose:
             print(f"gene-set count: {len(gene_sets)}")
@@ -360,7 +361,7 @@ def prepare_gene_set(gene_set_file, gene_set_output, sim_thres, verbose):
         for j in range(1, m):
             if i < j:
                 ind = get_dist(m, i, j)
-                if dm[ind] < sim_thres:
+                if dm[ind] < sim_thresh:
                     removes.append((j))
     if verbose:
         print('done')
@@ -376,13 +377,70 @@ def prepare_gene_set(gene_set_file, gene_set_output, sim_thres, verbose):
         pickle.dump(gene_sets, file1)
     with open(gene_set_output / 'filtered_gene_sets.pkl', 'wb') as file2: 
         pickle.dump(filtered_gene_sets, file2)
-    with open(gene_set_output / 'final_gene_sets.pkl', 'wb') as file3: 
+    with open(gene_set_output / final_gene_set_name, 'wb') as file3: 
         pickle.dump(final_gene_sets, file3)
         
     return gene_sets, filtered_gene_sets, final_gene_sets
 
+def dot_plot_gse(df, treatment, output, col):
+    fig, ax1 = plt.subplots(figsize=(8, 8))
+    gp.dotplot(df, column=col, size=6, top_term=10, figsize=(6,8), title = f"Enrichement: {treatment}", cmap="viridis_r", ax=ax1)
+    fig.savefig(output / f"enrichr-dotplot-{treatment}.png")
+    fig.savefig(output / f"enrichr-dotplot-{treatment}.pdf")
+    fig.savefig(output / f"enrichr-dotplot-{treatment}.svg")
+    return fig
 
-def run_gse(candidate_df, treatment, gene_sets, background, output, verbose):
+def enrichment_plot_gse(df, treatment, output, col):
+        nodes, edges = gp.enrichment_map(df, column=col, top_term=20)
+        G = nx.from_pandas_edgelist(edges, source='src_idx', target='targ_idx', edge_attr=['jaccard_coef', 'overlap_coef', 'overlap_genes'])
+
+        # Add missing node if there is any
+        for node in nodes.index:
+            if node not in G.nodes():
+                G.add_node(node)
+                
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+        # init node cooridnates
+        # pos=nx.layout.shell_layout(G)
+        pos=nx.layout.kamada_kawai_layout(G)
+
+        # draw nodes
+        node_size = list(nodes.Hits_ratio*1000)
+        node_color = list(nodes['P-value'])
+        net_nodes = nx.draw_networkx_nodes(G, pos=pos, cmap='RdYlBu', node_color=node_color, node_size=node_size, ax=ax)
+        # make legends
+        legend1 = ax.legend(
+            *net_nodes.legend_elements("sizes", num=4),
+            loc="upper right",
+            title="Hits ratio\n* 1000",
+            bbox_to_anchor=(1.16, 1),
+            borderpad=1,
+            labelspacing=2.5,
+            )
+        ax.add_artist(legend1)
+        legend2 = ax.legend(*net_nodes.legend_elements("colors"), loc="lower right", title="P-value", bbox_to_anchor=(1.15, 0))
+
+        # draw node labels
+        labels = nodes.Term.to_dict()
+        nx.draw_networkx_labels(G, pos=pos, labels=labels, font_size=8, ax=ax)
+
+        # draw edges
+        edge_weight = nx.get_edge_attributes(G, 'jaccard_coef').values()
+        width = list(map(lambda x: x*10, edge_weight))
+        nx.draw_networkx_edges(G, pos=pos, width=width, edge_color='#CDDBD4', ax=ax)
+        plt.tight_layout()
+        
+        fig.savefig(output / f"enrichr-netowrk-{treatment}.png")
+        fig.savefig(output / f"enrichr-netowrk-{treatment}.pdf")
+        fig.savefig(output / f"enrichr-netowrk-{treatment}.svg")
+        
+        # save to GraphML format if someone wants to use Cytoscape
+        nx.write_graphml(G, output / f'{treatment}.graphml')
+        
+        return fig
+
+def run_gse(candidate_df, treatment, gene_sets, background, output, return_fig=False):
     
     enriched_df = candidate_df[candidate_df['enriched'] == treatment]
     gene_df1 = enriched_df.explode("genes").reset_index(drop=True).copy(deep=True)
@@ -397,72 +455,39 @@ def run_gse(candidate_df, treatment, gene_sets, background, output, verbose):
     res_df.to_csv(output / f"enrichr-results-{treatment}.tsv", sep='\t')
     
     # dot plot
-    
     try:
-        fig1, ax1 = plt.subplots(figsize=(8, 8))
-        gp.dotplot(res_df, column="Adjusted P-value", size=6, top_term=10, figsize=(6,8), title = f"Enrichement: {treatment}", cmap="viridis_r", ax=ax1)
-        fig1.savefig(output / f"enrichr-dotplot-{treatment}.png")
-        fig1.savefig(output / f"enrichr-dotplot-{treatment}.pdf")
-        fig1.savefig(output / f"enrichr-dotplot-{treatment}.svg")
-        plt.close()
+        fig1 = dot_plot_gse(res_df, treatment, output, "Adjusted P-value")
+        plt.close(fig1)
     except Exception as e:
-        print(f"Error in gp.dotplot()\n\t{e}/n")
-        
-        
-        
+        print(f"Error in gp.dotplot()\n\t{e}")
+        print("\tTrying with un-adjusted p-value")
+        try:
+            fig1 = dot_plot_gse(res_df, treatment, output, "P-value")
+            print("success")
+            plt.close(fig1)
+        except Exception as e:
+            print(f"Error in gp.dotplot()\n\t{e}")
+            print("No dot plot can be created")
+            fig1 = None
+    
     # build graph
     try:
-        nodes, edges = gp.enrichment_map(res_df, column="Adjusted P-value", top_term=20)
-        G = nx.from_pandas_edgelist(edges, source='src_idx', target='targ_idx', edge_attr=['jaccard_coef', 'overlap_coef', 'overlap_genes'])
-
-        # Add missing node if there is any
-        for node in nodes.index:
-            if node not in G.nodes():
-                G.add_node(node)
-                
-        fig2, ax2 = plt.subplots(figsize=(8, 8))
-
-        # init node cooridnates
-        # pos=nx.layout.shell_layout(G)
-        pos=nx.layout.kamada_kawai_layout(G)
-
-        # draw nodes
-        node_size = list(nodes.Hits_ratio*1000)
-        node_color = list(nodes['P-value'])
-        net_nodes = nx.draw_networkx_nodes(G, pos=pos, cmap='RdYlBu', node_color=node_color, node_size=node_size, ax=ax2)
-        # make legends
-        legend1 = ax2.legend(
-            *net_nodes.legend_elements("sizes", num=4),
-            loc="upper right",
-            title="Hits ratio\n* 1000",
-            bbox_to_anchor=(1.16, 1),
-            borderpad=1,
-            labelspacing=2.5,
-            )
-        ax2.add_artist(legend1)
-        legend2 = ax2.legend(*net_nodes.legend_elements("colors"), loc="lower right", title="P-value", bbox_to_anchor=(1.15, 0))
-
-        # draw node labels
-        labels = nodes.Term.to_dict()
-        nx.draw_networkx_labels(G, pos=pos, labels=labels, font_size=8, ax=ax2)
-
-        # draw edges
-        edge_weight = nx.get_edge_attributes(G, 'jaccard_coef').values()
-        width = list(map(lambda x: x*10, edge_weight))
-        nx.draw_networkx_edges(G, pos=pos, width=width, edge_color='#CDDBD4', ax=ax2)
-        plt.tight_layout()
-        
-        fig2.savefig(output / f"enrichr-netowrk-{treatment}.png")
-        fig2.savefig(output / f"enrichr-netowrk-{treatment}.pdf")
-        fig2.savefig(output / f"enrichr-netowrk-{treatment}.svg")
-        plt.close()
-        
-        # save to GraphML format if someone wants to use Cytoscape
-        nx.write_graphml(G, output / f'{treatment}.graphml')
-        
+        fig2 = enrichment_plot_gse(res_df, treatment, output, "Adjusted P-value")
+        plt.close(fig2)
     except Exception as e:
-        print(f"Error in gp.enrichment_map()\n\t{e}\n")
+        print(f"Error in gp.enrichment_map()\n\t{e}")
+        print("\tTrying with un-adjusted p-value")
+        try:
+            fig2 = enrichment_plot_gse(res_df, treatment, output, "P-value")
+            print("success")
+            plt.close(fig2)
+        except Exception as e:
+            print(f"Error in gp.enrichment_map()\n\t{e}")
+            print("No enrichment plot can be created")
+            fig2 = None
     
+    if return_fig:
+        return (fig1, fig2)
     
 def main(args):
     cis_dir: Path = args["CIS_dir"]
@@ -561,19 +586,19 @@ def main(args):
     main_res_dir = output.parent.parent.parent
     gene_set_output = main_res_dir / "processed_gene_sets"
     gene_set_output.mkdir(exist_ok=True, parents=True)
-    gene_sets, filtered_gene_sets, final_gene_sets = prepare_gene_set(gene_set_file, gene_set_output, sim_thresh, verbose)
+    gene_sets, filtered_gene_sets, final_gene_sets = prepare_gene_set(gene_set_file, gene_set_output, verbose=verbose)
     # NOTE: it is suggested to use the final_gene_sets, as these are pathway that have been filtered for gene size
     # and redundant pathways removed.
     
     # case enrichment
     case_output = output / f"gene_set_enrichment-{case_group}"
     case_output.mkdir(exist_ok=True, parents=True)
-    run_gse(candidate_df, case_group, final_gene_sets, background_gene_list, case_output, verbose)
+    run_gse(candidate_df, case_group, final_gene_sets, background_gene_list, case_output)
 
     # control enrichment
     control_output = output / f"gene_set_enrichment-{control_group}"
     control_output.mkdir(exist_ok=True, parents=True)
-    run_gse(candidate_df, control_group, final_gene_sets, background_gene_list, control_output, verbose)
+    run_gse(candidate_df, control_group, final_gene_sets, background_gene_list, control_output)
 
 
     # pyGenomeViewer genomic tracks
@@ -587,7 +612,8 @@ def main(args):
     bed_df.to_csv(main_res_dir / "MRK_List2.bed", sep="\t", index=False, header=False)
 
 
-    # TODO: the number of insertions (CPM) isn't shown, just the insertion site. How should I portray this?
+    # NOTE: For next version
+    # the number of insertions (CPM) isn't shown, just the insertion site. How should I portray this?
     # maybe with color intensity?
 
     # make bed file for each region to plot in pyGenomeViewer for candidate genes and for top CIS
@@ -609,7 +635,7 @@ def main(args):
     top_CIS_bed["chromEnd"] = top_CIS["CIS_end"]
     top_CIS_bed["name"] = top_CIS['genes'].apply(lambda x: " | ".join(x))
     top_CIS_bed["score"] = 1000
-    top_CIS_bed["strand"] = "."  # TODO: add strand specificity?
+    top_CIS_bed["strand"] = "."  # NOTE: add strand specificity in next version
     top_CIS_bed["thickStart"] = top_CIS["CIS_start"]
     top_CIS_bed["thickEnd"] = top_CIS["CIS_end"]
     top_CIS_bed["itemRGB"] = ""  # "255,255,255"
