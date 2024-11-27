@@ -171,7 +171,7 @@ def preprocess_reads(tpn: Seq, primer: Seq, read_f: Path, read_r: Path, mysample
 
 def preprocess_read_helper(iter_args) -> None:
     """helper function for multiprocessing of preprocess_reads()"""
-    row, args = iter_args
+    row, library, args = iter_args
     
     data_dir = args["data"]
     bam_output_dir = args["bam_output"]
@@ -182,22 +182,30 @@ def preprocess_read_helper(iter_args) -> None:
     primer = args["primer"]
     report_output_dir = args["report_output"]
     
+    # separate IRL and IRR to run in parallel
     mysample = row.iloc[0]
-    irl_F = data_dir / row.iloc[1]
-    irl_R = data_dir / row.iloc[2]
-    irl_file = bam_output_dir / (mysample + "_IRL")
-    preprocess_reads(irl_tpn, primer, irl_F, irl_R, irl_file, 'IRL', ntask, genome_index_dir, report_output_dir)
     
-    irr_F = data_dir / row.iloc[3]
-    irr_R = data_dir / row.iloc[4]
-    irr_file = bam_output_dir / (mysample + "_IRR")
-    preprocess_reads(irr_tpn, primer, irr_F, irr_R, irr_file, 'IRR', ntask, genome_index_dir, report_output_dir)
+    if library == 'IRL':
+        irl_F = data_dir / row.iloc[1]
+        irl_R = data_dir / row.iloc[2]
+        irl_file = bam_output_dir / (mysample + "_IRL")
+        preprocess_reads(irl_tpn, primer, irl_F, irl_R, irl_file, 'IRL', ntask, genome_index_dir, report_output_dir)
+    
+    else:
+        irr_F = data_dir / row.iloc[3]
+        irr_R = data_dir / row.iloc[4]
+        irr_file = bam_output_dir / (mysample + "_IRR")
+        preprocess_reads(irr_tpn, primer, irr_F, irr_R, irr_file, 'IRR', ntask, genome_index_dir, report_output_dir)
 
         
 def main() -> None:
     main_args = load_args()
     files_df = pd.read_csv(main_args["input"], sep="\t")
-    iter_args = [ (row[1], main_args) for row in files_df.iterrows() ]
+    iter_args = []
+    for row in files_df.iterrows():
+        iter_args.append((row[1], 'IRL', main_args))
+        iter_args.append((row[1], 'IRR', main_args))
+        
     if main_args['verbose']:
         print("preprocess_reads.py:")
         iter_args = tqdm(iter_args)
