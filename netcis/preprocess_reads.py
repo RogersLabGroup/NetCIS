@@ -100,78 +100,71 @@ def run_preprocessing(cutadapt, ntask, genome_index_dir, trim1_f, trim1_r, pre_b
     assert (res_bowtie.returncode == 0), f"Error in bowtie\n\n{res_bowtie.stderr}"
     assert (res_idxstats.returncode == 0), f"Error in idxstats\n\n{res_idxstats.stderr}"
 
-def preprocess_reads(tpn: Seq, primer: Seq, read_f: Path, read_r: Path, mysample_file: str, library: str, ntask, genome_index_dir, report_output):
+def preprocess_reads(tpn: Seq, primer: Seq, read_f: Path, read_r: Path, mysample_file: Path, library, tpn_orient, ntask, genome_index_dir, report_output):
     """Process forward and reverse reads: trim transposon and primer, map reads, save to bam file"""
 
-    trim1_f_orient_pos = mysample_file.with_name("trim1-orient_pos-" + read_f.name)
-    trim1_r_orient_pos = mysample_file.with_name("trim1-orient_pos-" + read_r.name)
-    cutadapt_report_orient_pos = mysample_file.with_suffix(".cutadapt-orient_pos.txt").name
-    
-    pre_bam_file_orient_pos = mysample_file.with_suffix(".prefiltering-orient_pos.bam")
-    bowtie_report_orient_pos = mysample_file.with_suffix(".bowtie-orient_pos.txt").name
-    
-    bam_file_orient_pos = mysample_file.with_suffix(".orient_pos.bam")
-    bam_report_orient_pos = mysample_file.with_suffix(".idxstats-orient_pos.txt").name
-    
-    
-    trim1_f_orient_neg = mysample_file.with_name("trim1-orient_neg-" + read_f.name)
-    trim1_r_orient_neg = mysample_file.with_name("trim1-orient_neg-" + read_r.name)
-    cutadapt_report_orient_neg = mysample_file.with_suffix(".cutadapt-orient_neg.txt").name
-    
-    pre_bam_file_orient_neg = mysample_file.with_suffix(".prefiltering-orient_neg.bam")
-    bowtie_report_orient_neg = mysample_file.with_suffix(".bowtie-orient_neg.txt").name
-    
-    bam_file_orient_neg = mysample_file.with_suffix(".orient_neg.bam")
-    bam_report_orient_neg = mysample_file.with_suffix(".idxstats-orient_neg.txt").name
-
-    # v3
-    if library == "IRL":
-        # IRL and tpn in forward orientation with strand
-        cutadapt_orient_pos = (
-            f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-            f"-g ^{primer} -a {tpn} -G ^{tpn.reverse_complement()} -A {primer.reverse_complement()} "
-            f"-o {trim1_f_orient_pos} -p {trim1_r_orient_pos} {read_f} {read_r} > {report_output / cutadapt_report_orient_pos}"
-        )
-        # IRL and tpn in reverse orientation against strand
-        cutadapt_orient_neg = (
-            f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-            f"-g ^{tpn.reverse_complement()} -a {primer.reverse_complement()} -G ^{primer} -A {tpn} "
-            f"-o {trim1_f_orient_neg} -p {trim1_r_orient_neg} {read_f} {read_r} > {report_output / cutadapt_report_orient_neg}"
-        )
-    else:  # IRR
-        # IRR and tpn in forward orientation with strand
-        cutadapt_orient_pos = (
-            f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-            f"-g ^{tpn} -a {primer} -G ^{primer.reverse_complement()} -A {tpn.reverse_complement()} "
-            f"-o {trim1_f_orient_pos} -p {trim1_r_orient_pos} {read_f} {read_r} > {report_output / cutadapt_report_orient_pos}"
-        )
+    if tpn_orient == "+":
+        trim1_f = mysample_file.with_name("trim1-orient_pos-" + read_f.name)
+        trim1_r = mysample_file.with_name("trim1-orient_pos-" + read_r.name)
+        cutadapt_report = mysample_file.with_suffix(".cutadapt-orient_pos.txt").name
         
-        # IRR and tpn in reverse orientation against strand
-        cutadapt_orient_neg = (
-            f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-            f"-g ^{primer.reverse_complement()} -a {tpn.reverse_complement()} -G ^{tpn} -A {primer} "
-            f"-o {trim1_f_orient_neg} -p {trim1_r_orient_neg} {read_f} {read_r} > {report_output / cutadapt_report_orient_neg}"
-        )
+        pre_bam_file = mysample_file.with_suffix(".prefiltering-orient_pos.bam")
+        bowtie_report = mysample_file.with_suffix(".bowtie-orient_pos.txt").name
+        
+        bam_file = mysample_file.with_suffix(".orient_pos.bam")
+        bam_report = mysample_file.with_suffix(".idxstats-orient_pos.txt").name
+        
+        if library == "IRL":
+            # IRL and tpn in forward orientation with strand
+            cutadapt = (
+                f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
+                f"-g ^{primer} -a {tpn} -G ^{tpn.reverse_complement()} -A {primer.reverse_complement()} "
+                f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
+            )
+        else:
+            # IRR and tpn in forward orientation with strand
+            cutadapt = (
+                f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
+                f"-g ^{tpn} -a {primer} -G ^{primer.reverse_complement()} -A {tpn.reverse_complement()} "
+                f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
+            )
+            
+    else:
+        trim1_f = mysample_file.with_name("trim1-orient_neg-" + read_f.name)
+        trim1_r = mysample_file.with_name("trim1-orient_neg-" + read_r.name)
+        cutadapt_report = mysample_file.with_suffix(".cutadapt-orient_neg.txt").name
+        
+        pre_bam_file = mysample_file.with_suffix(".prefiltering-orient_neg.bam")
+        bowtie_report = mysample_file.with_suffix(".bowtie-orient_neg.txt").name
+        
+        bam_file = mysample_file.with_suffix(".orient_neg.bam")
+        bam_report = mysample_file.with_suffix(".idxstats-orient_neg.txt").name
+
+        if library == "IRL":
+            # IRL and tpn in reverse orientation against strand
+            cutadapt = (
+                f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
+                f"-g ^{tpn.reverse_complement()} -a {primer.reverse_complement()} -G ^{primer} -A {tpn} "
+                f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
+            )
+        else:
+            # IRR and tpn in reverse orientation against strand
+            cutadapt = (
+                f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
+                f"-g ^{primer.reverse_complement()} -a {tpn.reverse_complement()} -G ^{tpn} -A {primer} "
+                f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
+            )
     
-    # positive orientation
     run_preprocessing(
-        cutadapt_orient_pos,
-        ntask, genome_index_dir, trim1_f_orient_pos, trim1_r_orient_pos, pre_bam_file_orient_pos, bowtie_report_orient_pos, 
-        bam_file_orient_pos, bam_report_orient_pos,
-        report_output,
-        )
-    
-    # negative orientation
-    run_preprocessing(
-        cutadapt_orient_neg,
-        ntask, genome_index_dir, trim1_f_orient_neg, trim1_r_orient_neg, pre_bam_file_orient_neg, bowtie_report_orient_neg, 
-        bam_file_orient_neg, bam_report_orient_neg,
+        cutadapt,
+        ntask, genome_index_dir, trim1_f, trim1_r, pre_bam_file, bowtie_report, 
+        bam_file, bam_report,
         report_output,
         )
 
 def preprocess_read_helper(iter_args) -> None:
     """helper function for multiprocessing of preprocess_reads()"""
-    row, library, args = iter_args
+    row, library, tpn_orient, args = iter_args
     
     data_dir = args["data"]
     bam_output_dir = args["bam_output"]
@@ -188,23 +181,25 @@ def preprocess_read_helper(iter_args) -> None:
     if library == 'IRL':
         irl_F = data_dir / row.iloc[1]
         irl_R = data_dir / row.iloc[2]
-        irl_file = bam_output_dir / (mysample + "_IRL")
-        preprocess_reads(irl_tpn, primer, irl_F, irl_R, irl_file, 'IRL', ntask, genome_index_dir, report_output_dir)
+        irl_file = bam_output_dir / (mysample + f"_{library}")
+        preprocess_reads(irl_tpn, primer, irl_F, irl_R, irl_file, library, tpn_orient, ntask, genome_index_dir, report_output_dir)
     
-    else:
+    else:  # library == 'IRR'
         irr_F = data_dir / row.iloc[3]
         irr_R = data_dir / row.iloc[4]
-        irr_file = bam_output_dir / (mysample + "_IRR")
-        preprocess_reads(irr_tpn, primer, irr_F, irr_R, irr_file, 'IRR', ntask, genome_index_dir, report_output_dir)
-
+        irr_file = bam_output_dir / (mysample + f"_{library}")
+        preprocess_reads(irr_tpn, primer, irr_F, irr_R, irr_file, library, tpn_orient, ntask, genome_index_dir, report_output_dir)
         
 def main() -> None:
     main_args = load_args()
     files_df = pd.read_csv(main_args["input"], sep="\t")
     iter_args = []
     for row in files_df.iterrows():
-        iter_args.append((row[1], 'IRL', main_args))
-        iter_args.append((row[1], 'IRR', main_args))
+        # input file row, library, tpn orientation, args
+        iter_args.append((row[1], 'IRL', '+', main_args))
+        iter_args.append((row[1], 'IRL', '-', main_args))
+        iter_args.append((row[1], 'IRR', '+', main_args))
+        iter_args.append((row[1], 'IRR', '-', main_args))
         
     if main_args['verbose']:
         print("preprocess_reads.py:")
