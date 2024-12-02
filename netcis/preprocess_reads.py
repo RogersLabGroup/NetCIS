@@ -165,7 +165,7 @@ def preprocess_reads(tpn: Seq, primer: Seq, read_f: Path, read_r: Path, mysample
 
 def preprocess_read_helper(iter_args) -> None:
     """helper function for multiprocessing of preprocess_reads()"""
-    (row, library, tpn_orient, args), progress_counter = iter_args
+    (row, library, tpn_orient, args), progress_queue = iter_args
     
     data_dir = args["data"]
     bam_output_dir = args["bam_output"]
@@ -191,19 +191,10 @@ def preprocess_read_helper(iter_args) -> None:
         irr_file = bam_output_dir / (mysample + f"_{library}")
         preprocess_reads(irr_tpn, primer, irr_F, irr_R, irr_file, library, tpn_orient, ntask, genome_index_dir, report_output_dir)
     
-    # update progress bar
-    progress_counter.value += 1
-    
+    # Put 1 in the queue to indicate completion of a task
+    progress_queue.put(1)
 
-# Function to handle progress bar
-def update_progress_bar(progress_counter, total_tasks, pbar):
-    while progress_counter.value < total_tasks:
-        pbar.n = progress_counter.value
-        pbar.last_print_n = progress_counter.value
-        pbar.update(0)  # Manually update the progress bar
-        time.sleep(0.1)  # Sleep to reduce CPU usage
-        
-        
+
 def main() -> None:
     main_args = load_args()
     files_df = pd.read_csv(main_args["input"], sep="\t")
@@ -215,30 +206,24 @@ def main() -> None:
         iter_args.append((row[1], 'IRR', '+', main_args))
         iter_args.append((row[1], 'IRR', '-', main_args))
         
- 
-
-
-
     
     if main_args['verbose']:
         print("preprocess_reads.py:")
         
         # edits made to a ChatGPT answer on how to manually control progress bar of tqdm as follows below
-        # Create a Manager to share data between processes
-        with Manager as manager:
-            progress_counter = manager.Value('i', 0)
-            
+        # Create a Manager and Queue to share data between processes
+        with Manager() as manager:
+            # Queue to track progress
+            progress_queue = manager.Queue()
             # Create a tqdm progress bar
-            with tqdm(iter_args, total=len(iter_args)) as pbar:
-                # Start the progress bar update thread
-                Thread(target=update_progress_bar, args=(progress_counter, len(iter_args), pbar), daemon=True).start()
-
+            with tqdm(total=len(iter_args)) as pbar:
                 # Create a Pool of workers
                 with Pool(main_args["npara"]) as p:
-                    # Use imap_unordered to process the tasks
-                    p.starmap(preprocess_read_helper, [(x, progress_counter) for x in iter_args])
-    else:
+                    # Submit tasks asynchronously
+                    for x in iter_args:
+                        p.apply_async(preprocess_read_helper, args=(x, progress_queue))
         # end to ChatGPT suggested code
+    else:
         with Pool(main_args["npara"]) as p:
             [ x for x in p.imap_unordered(preprocess_read_helper, iter_args, chunksize=1) ]
 
