@@ -1,6 +1,7 @@
 import sys, subprocess, time
 from pathlib import Path
-from multiprocessing import Pool
+from multiprocessing import Pool, Manager
+from threading import Thread
 
 import numpy as np
 import pandas as pd
@@ -118,18 +119,18 @@ def preprocess_reads(tpn: Seq, primer: Seq, read_f: Path, read_r: Path, mysample
             # IRL and tpn in forward orientation with strand
             cutadapt = (
                 f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                f"-g ^{primer} -a {tpn} -G ^{tpn.reverse_complement()} -A {primer.reverse_complement()} "
+                f"-g {primer} -a {tpn} -G {tpn.reverse_complement()} -A {primer.reverse_complement()} "
                 f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
             )
-        else:
+        else:  # library == "IRR":
             # IRR and tpn in forward orientation with strand
             cutadapt = (
                 f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                f"-g ^{tpn} -a {primer} -G ^{primer.reverse_complement()} -A {tpn.reverse_complement()} "
+                f"-g {tpn} -a {primer} -G {primer.reverse_complement()} -A {tpn.reverse_complement()} "
                 f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
             )
             
-    else:
+    else:  # tpn_orient == "-"
         trim1_f = mysample_file.with_name("trim1-orient_neg-" + read_f.name)
         trim1_r = mysample_file.with_name("trim1-orient_neg-" + read_r.name)
         cutadapt_report = mysample_file.with_suffix(".cutadapt-orient_neg.txt").name
@@ -144,14 +145,14 @@ def preprocess_reads(tpn: Seq, primer: Seq, read_f: Path, read_r: Path, mysample
             # IRL and tpn in reverse orientation against strand
             cutadapt = (
                 f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                f"-g ^{tpn.reverse_complement()} -a {primer.reverse_complement()} -G ^{primer} -A {tpn} "
+                f"-g {tpn.reverse_complement()} -a {primer.reverse_complement()} -G {primer} -A {tpn} "
                 f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
             )
-        else:
+        else:  # library == "IRR"
             # IRR and tpn in reverse orientation against strand
             cutadapt = (
                 f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                f"-g ^{primer.reverse_complement()} -a {tpn.reverse_complement()} -G ^{tpn} -A {primer} "
+                f"-g {primer.reverse_complement()} -a {tpn.reverse_complement()} -G {tpn} -A {primer} "
                 f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
             )
     
@@ -164,7 +165,7 @@ def preprocess_reads(tpn: Seq, primer: Seq, read_f: Path, read_r: Path, mysample
 
 def preprocess_read_helper(iter_args) -> None:
     """helper function for multiprocessing of preprocess_reads()"""
-    row, library, tpn_orient, args = iter_args
+    (row, library, tpn_orient, args), progress_counter = iter_args
     
     data_dir = args["data"]
     bam_output_dir = args["bam_output"]
@@ -189,6 +190,19 @@ def preprocess_read_helper(iter_args) -> None:
         irr_R = data_dir / row.iloc[4]
         irr_file = bam_output_dir / (mysample + f"_{library}")
         preprocess_reads(irr_tpn, primer, irr_F, irr_R, irr_file, library, tpn_orient, ntask, genome_index_dir, report_output_dir)
+    
+    # update progress bar
+    progress_counter.value += 1
+    
+
+# Function to handle progress bar
+def update_progress_bar(progress_counter, total_tasks, pbar):
+    while progress_counter.value < total_tasks:
+        pbar.n = progress_counter.value
+        pbar.last_print_n = progress_counter.value
+        pbar.update(0)  # Manually update the progress bar
+        time.sleep(0.1)  # Sleep to reduce CPU usage
+        
         
 def main() -> None:
     main_args = load_args()
@@ -201,13 +215,32 @@ def main() -> None:
         iter_args.append((row[1], 'IRR', '+', main_args))
         iter_args.append((row[1], 'IRR', '-', main_args))
         
+ 
+
+
+
+    
     if main_args['verbose']:
         print("preprocess_reads.py:")
-        iter_args = tqdm(iter_args)
+        
+        # edits made to a ChatGPT answer on how to manually control progress bar of tqdm as follows below
+        # Create a Manager to share data between processes
+        with Manager as manager:
+            progress_counter = manager.Value('i', 0)
+            
+            # Create a tqdm progress bar
+            with tqdm(iter_args, total=len(iter_args)) as pbar:
+                # Start the progress bar update thread
+                Thread(target=update_progress_bar, args=(progress_counter, len(iter_args), pbar), daemon=True).start()
 
-    with Pool(main_args["npara"]) as p:
-        [ x for x in p.imap_unordered(preprocess_read_helper, iter_args, chunksize=1) ]
-        p.close()
-    
+                # Create a Pool of workers
+                with Pool(main_args["npara"]) as p:
+                    # Use imap_unordered to process the tasks
+                    p.starmap(preprocess_read_helper, [(x, progress_counter) for x in iter_args])
+    else:
+        # end to ChatGPT suggested code
+        with Pool(main_args["npara"]) as p:
+            [ x for x in p.imap_unordered(preprocess_read_helper, iter_args, chunksize=1) ]
+
 if __name__ == "__main__":
     main()
