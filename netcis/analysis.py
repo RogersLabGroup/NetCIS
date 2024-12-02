@@ -460,12 +460,13 @@ def run_gse(candidate_df, treatment, gene_sets, background, output, return_fig=F
         plt.close(fig1)
     except Exception as e:
         print(f"Error in gp.dotplot()\n\t{e}")
-        print("\tTrying with un-adjusted p-value")
+        print("\tTrying with un-adjusted p-value...", end='')
         try:
             fig1 = dot_plot_gse(res_df, treatment, output, "P-value")
             print("success")
             plt.close(fig1)
         except Exception as e:
+            print("failure")
             print(f"Error in gp.dotplot()\n\t{e}")
             print("No dot plot can be created")
             fig1 = None
@@ -476,12 +477,13 @@ def run_gse(candidate_df, treatment, gene_sets, background, output, return_fig=F
         plt.close(fig2)
     except Exception as e:
         print(f"Error in gp.enrichment_map()\n\t{e}")
-        print("\tTrying with un-adjusted p-value")
+        print("\tTrying with un-adjusted p-value...", end='')
         try:
             fig2 = enrichment_plot_gse(res_df, treatment, output, "P-value")
             print("success")
             plt.close(fig2)
         except Exception as e:
+            print("failure")
             print(f"Error in gp.enrichment_map()\n\t{e}")
             print("No enrichment plot can be created")
             fig2 = None

@@ -29,8 +29,8 @@ def load_args():
         print("\n")
     
     args["insertion_dir"] = Path(args["output_prefix"] + "-insertions")
-    args["depth_dir"] = Path(args["output_prefix"] + "-insertions-depth")
-    args["strand_dir"] = Path(args["output_prefix"] + "-insertions-depth-strand")
+    args["strand_dir"] = Path(args["output_prefix"] + "-insertions-strand")
+    args["tpn_orient_dir"] = Path(args["output_prefix"] + "-insertions-strand-tpn_orient")
     
     return args
 
@@ -57,14 +57,14 @@ def main(args):
         args (dict): input arguments from command line. See load_args() for details.
     """
     insertion_dir = args["insertion_dir"]   # for insertions_to_bed.py
-    depth_dir = args["depth_dir"]           # for pcis_networks.py
-    strand_dir = args["strand_dir"]         # for a future version of NetCIS that uses strand and tpn orientation info pCIS
+    strand_dir = args["strand_dir"]           # for pcis_networks.py
+    tpn_orient_dir = args["tpn_orient_dir"]         # for a future version of NetCIS that uses strand and tpn orientation info pCIS
     verbose = args["verbose"]
 
     if verbose:
         print("insertions_to_bed.py")
         print("Loading insertions from files...", end="")
-    insert_list = [ pd.read_pickle(file) for file in insertion_dir.iterdir()  ]
+    insert_list = [ pd.read_pickle(file) for file in tpn_orient_dir.iterdir()  ]
     if verbose:
         print("done")
     inserts_df = pd.concat(insert_list, ignore_index=True)
@@ -82,19 +82,21 @@ def main(args):
         for strand in inserts_df['strand'].unique():
             if verbose:
                 print(f"Creating bed file for treatment: {treatment}, and strand: {strand}")
-            treatment_strand_df = inserts_df[(inserts_df["treatment"] == treatment) & (inserts_df["strand"] == strand)]
-            treatment_strand_df = sort_chrom_pos(treatment_strand_df, 'chr', 'pos')
+            treatment_df = inserts_df[(inserts_df["treatment"] == treatment) & (inserts_df["strand"] == strand)].copy()
+            # treatment_strand_grouped_df = treatment_strand_df.groupby(["chr", "pos"])['CPM'].sum()
+            treatment_df['CPM_score'] = (treatment_df['CPM'] / treatment_df['CPM'].max()) * 1000
+            treatment_df = sort_chrom_pos(treatment_df, 'chr', 'pos')
 
-            out_df = pd.DataFrame(treatment_strand_df["chr"])
+            out_df = pd.DataFrame(treatment_df["chr"])
             out_df.columns = ["chrom"]
-            out_df["chromStart"] = inserts_df["pos"]-1  # 0-index based
-            out_df["chromEnd"] = inserts_df["pos"]  # ending not inclusive
-            out_df["name"] = ''  # inserts_df["treatment"]  # inserts_df["sampleID"]
-            out_df["score"] = 1000
-            out_df["strand"] = inserts_df["strand"]
+            out_df["chromStart"] = treatment_df["pos"]-1  # 0-index based
+            out_df["chromEnd"] = treatment_df["pos"]  # ending not inclusive
+            out_df["name"] = ''
+            out_df["score"] = treatment_df['CPM_score']
+            out_df["strand"] = treatment_df["strand"]
             out_df["thickStart"] = 0  # out_df["chromStart"]-1
             out_df["thickEnd"] = 0  # out_df["chromStart"]
-            out_df["itemRGB"] = inserts_df["strand_color"]
+            out_df["itemRGB"] = treatment_df["strand_color"]
             out_df.to_csv(insertion_dir.parent / f"{treatment}_{strand}.bed", sep="\t", index=False, header=False)
     if verbose:
         print()

@@ -474,9 +474,9 @@ def run_per_chrom(iter_args):
 
     # get statistics for insertion sites and CIS. This is where pCIS -> CIS
     IS_df, CIS_df = pcis_to_cis_with_stats(overlap_df, case_chrom_subgraphs, control_chrom_subgraphs, case, control, num_cases, num_controls, chrom)
-       
+    
     if verbose:
-        print(f"{chrom}\t{len(CIS_df)}")
+        print(f"\t{chrom}\t{len(CIS_df)}")
     
     return {"is": IS_df, "cis": CIS_df}
 

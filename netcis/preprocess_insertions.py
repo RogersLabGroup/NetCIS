@@ -44,14 +44,14 @@ def load_args() -> dict:
     args["bam_output"] = Path(args["output_prefix"] + "-bam")
     args["bam_output"].mkdir(parents=True, exist_ok=True)
     
-    args["insertions_output"] = Path(args["output_prefix"] + "-insertions")
-    args["insertions_output"].mkdir(parents=True, exist_ok=True)
+    args["insertions_dir"] = Path(args["output_prefix"] + "-insertions")
+    args["insertions_dir"].mkdir(parents=True, exist_ok=True)
     
-    args["depth_output"] = Path(args["output_prefix"] + "-insertions-depth")
-    args["depth_output"].mkdir(parents=True, exist_ok=True)
+    args["strand_dir"] = Path(args["output_prefix"] + "-insertions-strand")
+    args["strand_dir"].mkdir(parents=True, exist_ok=True)
     
-    args["strand_output"] = Path(args["output_prefix"] + "-insertions-depth-strand")
-    args["strand_output"].mkdir(parents=True, exist_ok=True)
+    args["tpn_orient_dir"] = Path(args["output_prefix"] + "-insertions-strand-tpn_orient")
+    args["tpn_orient_dir"].mkdir(parents=True, exist_ok=True)
     
     args["input"] = Path(args["input"])
     
@@ -159,25 +159,25 @@ def process_individual_insertions(tpn_orient, library, inserts_df):
     return inserts_df
 
 def group_insertions(inserts_df, total_reads, reads_per_chrom):
-    depth_lib_df = None
     strand_lib_df = None
+    tpn_orient_lib_df = None
     if (inserts_df is not None):
-        # use depth (CPM) for insertion file
+        # use depth (CPM) for insertion files
         # divide each insertion site by the total reads on that chromosome
         inserts_df["count"] = 0  # irrelevant what this holds, it's just a count in the next line
-        depth_lib_df = inserts_df.groupby(
-            by=["chr", "pos", "library"], sort=False, as_index=False, dropna=False
-            ).count()[["chr", "pos", "library", "count"]]
-        depth_lib_df["CPM"] = depth_lib_df.apply(lambda x: (x["count"] / total_reads) * 1e5, axis=1)
-        depth_lib_df["chrom_norm"] = depth_lib_df.apply(lambda x: x["count"] / (reads_per_chrom[x["chr"]]), axis=1)
-        
-        # use depth (CPM) and strand and transposon orientation for insertion file
         strand_lib_df = inserts_df.groupby(
-            by=["chr", "pos", "strand", "tpn_promoter_orient", "library"], sort=False, as_index=False, dropna=False
-            ).count()[["chr", "pos", "strand", "tpn_promoter_orient", "library", "count"]]
+            by=["chr", "pos", "strand", "library"], sort=False, as_index=False, dropna=False
+            ).count()[["chr", "pos", "strand", "library", "count"]]
         strand_lib_df["CPM"] = strand_lib_df.apply(lambda x: (x["count"] / total_reads) * 1e5, axis=1)
         strand_lib_df["chrom_norm"] = strand_lib_df.apply(lambda x: x["count"] / (reads_per_chrom[x["chr"]]), axis=1)
-    return depth_lib_df, strand_lib_df
+        
+        # use depth (CPM) and strand and transposon orientation for insertion file
+        tpn_orient_lib_df = inserts_df.groupby(
+            by=["chr", "pos", "strand", "tpn_promoter_orient", "library"], sort=False, as_index=False, dropna=False
+            ).count()[["chr", "pos", "strand", "tpn_promoter_orient", "library", "count"]]
+        tpn_orient_lib_df["CPM"] = tpn_orient_lib_df.apply(lambda x: (x["count"] / total_reads) * 1e5, axis=1)
+        tpn_orient_lib_df["chrom_norm"] = tpn_orient_lib_df.apply(lambda x: x["count"] / (reads_per_chrom[x["chr"]]), axis=1)
+    return strand_lib_df, tpn_orient_lib_df
     
 def get_total_reads(prefilter_bam_file):
     # prefiltering bam file has paired reads, while the final bam file has single reads
@@ -217,9 +217,9 @@ def process_bam_helper(iter_args: dict) -> None:
     row, args = iter_args
     sample_id = row.iloc[0]
     bam_dir = args["bam_output"]
-    insertions_dir = args["insertions_output"]
-    depth_dir = args["depth_output"]
-    strand_dir = args["strand_output"]
+    insertions_dir = args["insertions_dir"]
+    strand_dir = args["strand_dir"]
+    tpn_orient_dir = args["tpn_orient_dir"]
     verbose = args["verbose"]
    
    
@@ -239,8 +239,8 @@ def process_bam_helper(iter_args: dict) -> None:
 
     # remove same read names and return the new pos and neg orient dataframes for group_insertions
     tmp_ind_irl_pos_orient, tmp_ind_irl_neg_orient = remove_same_read_name(individual_irl_pos_orient, individual_irl_neg_orient)
-    depth_irl_df_pos_orient, strand_irl_df_pos_orient = group_insertions(tmp_ind_irl_pos_orient, irl_pos_orient_total_reads, irl_pos_orient_reads_per_chrom)
-    depth_irl_df_neg_orient, strand_irl_df_neg_orient = group_insertions(tmp_ind_irl_neg_orient, irl_neg_orient_total_reads, irl_neg_orient_reads_per_chrom)
+    strand_irl_df_pos_orient, tpn_orient_irl_df_pos_orient = group_insertions(tmp_ind_irl_pos_orient, irl_pos_orient_total_reads, irl_pos_orient_reads_per_chrom)
+    strand_irl_df_neg_orient, tpn_orient_irl_df_neg_orient = group_insertions(tmp_ind_irl_neg_orient, irl_neg_orient_total_reads, irl_neg_orient_reads_per_chrom)
 
 
     # IRR transposon orientation positive (with strand)
@@ -259,19 +259,19 @@ def process_bam_helper(iter_args: dict) -> None:
     
     # remove same read names and return the new pos and neg orient dataframes for group_insertions
     tmp_ind_irr_pos_orient, tmp_ind_irr_neg_orient = remove_same_read_name(individual_irr_pos_orient, individual_irr_neg_orient)
-    depth_irr_df_pos_orient, strand_irr_df_pos_orient = group_insertions(tmp_ind_irr_pos_orient, irr_pos_orient_total_reads, irr_pos_orient_reads_per_chrom)
-    depth_irr_df_neg_orient, strand_irr_df_neg_orient = group_insertions(tmp_ind_irr_neg_orient, irr_neg_orient_total_reads, irr_neg_orient_reads_per_chrom)
+    strand_irr_df_pos_orient, tpn_orient_irr_df_pos_orient = group_insertions(tmp_ind_irr_pos_orient, irr_pos_orient_total_reads, irr_pos_orient_reads_per_chrom)
+    strand_irr_df_neg_orient, tpn_orient_irr_df_neg_orient = group_insertions(tmp_ind_irr_neg_orient, irr_neg_orient_total_reads, irr_neg_orient_reads_per_chrom)
     
     
     # combine library and transposon orientation dataframes
     individual_df = pd.concat([tmp_ind_irl_pos_orient, tmp_ind_irl_neg_orient, tmp_ind_irr_pos_orient, tmp_ind_irr_neg_orient], ignore_index=True)
-    depth_df = pd.concat([depth_irl_df_pos_orient, strand_irl_df_pos_orient, depth_irr_df_pos_orient, strand_irr_df_pos_orient], ignore_index=True)
-    strand_df = pd.concat([depth_irl_df_neg_orient, strand_irl_df_neg_orient, depth_irr_df_neg_orient, strand_irr_df_neg_orient], ignore_index=True)
+    strand_df = pd.concat([strand_irl_df_pos_orient, strand_irl_df_neg_orient, strand_irr_df_pos_orient, strand_irr_df_neg_orient], ignore_index=True)
+    tpn_orient_df = pd.concat([tpn_orient_irl_df_pos_orient, tpn_orient_irl_df_neg_orient, tpn_orient_irr_df_pos_orient, tpn_orient_irr_df_neg_orient], ignore_index=True)
     
     # sort by chr, then pos
     individual_df = sort_chrom_pos(individual_df, 'chr', 'pos')
-    depth_df = sort_chrom_pos(depth_df, 'chr', 'pos')
     strand_df = sort_chrom_pos(strand_df, 'chr', 'pos')
+    tpn_orient_df = sort_chrom_pos(tpn_orient_df, 'chr', 'pos')
     
     # add sample_id, treatment group, and optional metadata
     for i, col in enumerate(row.index):
@@ -279,13 +279,13 @@ def process_bam_helper(iter_args: dict) -> None:
             continue
         else:
             individual_df[col] = row[col]
-            depth_df[col] = row[col]
             strand_df[col] = row[col]
+            tpn_orient_df[col] = row[col]
     
     # save insertions
     individual_df.to_pickle(insertions_dir / (sample_id + ".pkl"))   # for insertions_to_bed.py
-    depth_df.to_pickle(depth_dir / (sample_id + ".pkl"))             # for pcis_networks.py
-    strand_df.to_pickle(strand_dir / (sample_id + ".pkl"))           # for a future version of NetCIS that uses strand and tpn orientation info pCIS
+    strand_df.to_pickle(strand_dir / (sample_id + ".pkl"))             # for pcis_networks.py
+    tpn_orient_df.to_pickle(tpn_orient_dir / (sample_id + ".pkl"))           # for a future version of NetCIS that uses strand and tpn orientation info pCIS
 
 
 def main() -> None:
@@ -299,6 +299,7 @@ def main() -> None:
     with Pool(main_args["njobs"]) as p:
         [ x for x in p.imap_unordered(process_bam_helper, iter_args, chunksize=1) ]
         p.close()
+        p.join()
 
     if main_args['verbose']:
         print()
