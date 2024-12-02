@@ -18,23 +18,22 @@ def worker(task, progress_queue):
     progress_queue.put(1)  # Put 1 in the queue to indicate completion of a task
 
 def main():
-    # List of tasks to process (replace with your actual tasks)
-    tasks = range(100)
+
     
     # Create a Manager and Queue to share data between processes
     with Manager() as manager:
-        # Queue to track progress
-        progress_queue = manager.Queue()  
-
+        progress_queue = manager.Queue()  # Queue to track progress
+        
+        # List of tasks to process (replace with your actual tasks)
+        tasks = [ (x, progress_queue) for x in range(100) ]
+        
         # Create a tqdm progress bar
         with tqdm(total=len(tasks)) as pbar:
-            
             # Create a Pool of workers
-            with Pool(10) as pool:
-                
+            with Pool(50) as pool:
                 # Submit tasks asynchronously
                 for task in tasks:
-                    pool.apply_async(worker, args=(task, progress_queue))
+                    pool.apply_async(func=worker, args=task)
 
                 # Monitor progress and update the progress bar
                 completed_tasks = 0
@@ -48,3 +47,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
