@@ -107,7 +107,6 @@ def run_preprocessing(cutadapt, ntask, genome_index_dir, trim1_f, trim1_r, pre_b
 
 def preprocess_reads(tpn: Seq, primer: Seq, read_f: Path, read_r: Path, mysample_file: Path, library, tpn_orient, ntask, genome_index_dir, report_output, cutadapt_policy):
     """Process forward and reverse reads: trim transposon and primer, map reads, save to bam file"""
-
     if tpn_orient == "+":
         trim1_f = mysample_file.with_name("trim1-orient_pos-" + read_f.name)
         trim1_r = mysample_file.with_name("trim1-orient_pos-" + read_r.name)
@@ -118,67 +117,41 @@ def preprocess_reads(tpn: Seq, primer: Seq, read_f: Path, read_r: Path, mysample
         
         bam_file = mysample_file.with_suffix(".orient_pos.bam")
         bam_report = mysample_file.with_suffix(".idxstats-orient_pos.txt").name
+        
+        cutadapt1 = f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
+        cutadapt3 = f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
+    
         if cutadapt_policy == 'low':
             if library == "IRL":
                 # IRL and tpn in forward orientation with strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-g {primer} -a {tpn} -G {tpn.reverse_complement()} -A {primer.reverse_complement()} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-                )
+                cutadapt2 = f"-g {primer} -a {tpn} -G {tpn.reverse_complement()} -A {primer.reverse_complement()} "
             else:  # library == "IRR":
                 # IRR and tpn in forward orientation with strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-g {tpn} -a {primer} -G {primer.reverse_complement()} -A {tpn.reverse_complement()} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-            )
+                cutadapt2 = f"-g {tpn} -a {primer} -G {primer.reverse_complement()} -A {tpn.reverse_complement()} "
+        
         elif cutadapt_policy == 'medium':
             if library == "IRL":
                 # IRL and tpn in forward orientation with strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-g ^{primer} -a {tpn} -G ^{tpn.reverse_complement()} -A {primer.reverse_complement()} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-                )
+                cutadapt2 = f"-g ^{primer} -a {tpn} -G ^{tpn.reverse_complement()} -A {primer.reverse_complement()} "
             else:  # library == "IRR":
                 # IRR and tpn in forward orientation with strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-g ^{tpn} -a {primer} -G ^{primer.reverse_complement()} -A {tpn.reverse_complement()} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-            )
+                cutadapt2 = f"-g ^{tpn} -a {primer} -G ^{primer.reverse_complement()} -A {tpn.reverse_complement()} "
+                
         elif cutadapt_policy == 'high':
             if library == "IRL":
                 # IRL and tpn in forward orientation with strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-a {primer}...{tpn} -A {tpn.reverse_complement()}...{primer.reverse_complement()} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-                )
+                cutadapt2 = f"-a {primer}...{tpn} -A {tpn.reverse_complement()}...{primer.reverse_complement()} "
             else:  # library == "IRR":
                 # IRR and tpn in forward orientation with strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-a {tpn}...{primer} -A {primer.reverse_complement()}...{tpn.reverse_complement()} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-            )
+                cutadapt2 = f"-a {tpn}...{primer} -A {primer.reverse_complement()}...{tpn.reverse_complement()} "
+        
         else:  # cutadapt_policy == 'strict':
             if library == "IRL":
                 # IRL and tpn in forward orientation with strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-a ^{primer}...{tpn} -A ^{tpn.reverse_complement()}...{primer.reverse_complement()} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-                )
+                cutadapt2 = f"-a ^{primer}...{tpn} -A ^{tpn.reverse_complement()}...{primer.reverse_complement()} "
             else:  # library == "IRR":
                 # IRR and tpn in forward orientation with strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-a ^{tpn}...{primer} -A ^{primer.reverse_complement()}...{tpn.reverse_complement()} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-            )
-                
+                cutadapt2 = f"-a ^{tpn}...{primer} -A ^{primer.reverse_complement()}...{tpn.reverse_complement()} "                
                 
     else:  # tpn_orient == "-"
         trim1_f = mysample_file.with_name("trim1-orient_neg-" + read_f.name)
@@ -190,67 +163,44 @@ def preprocess_reads(tpn: Seq, primer: Seq, read_f: Path, read_r: Path, mysample
         
         bam_file = mysample_file.with_suffix(".orient_neg.bam")
         bam_report = mysample_file.with_suffix(".idxstats-orient_neg.txt").name
+        
+        cutadapt1 = f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
+        cutadapt3 = f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
+        
         if cutadapt_policy == 'low':
             if library == "IRL":
                 # IRL and tpn in reverse orientation against strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-g {tpn.reverse_complement()} -a {primer.reverse_complement()} -G {primer} -A {tpn} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-                )
+                cutadapt2 = f"-g {tpn.reverse_complement()} -a {primer.reverse_complement()} -G {primer} -A {tpn} "
             else:  # library == "IRR"
                 # IRR and tpn in reverse orientation against strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-g {primer.reverse_complement()} -a {tpn.reverse_complement()} -G {tpn} -A {primer} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-                )
-        if cutadapt_policy == 'medium':
+                cutadapt2 = f"-g {primer.reverse_complement()} -a {tpn.reverse_complement()} -G {tpn} -A {primer} "
+
+        elif cutadapt_policy == 'medium':
             if library == "IRL":
                 # IRL and tpn in reverse orientation against strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-g ^{tpn.reverse_complement()} -a {primer.reverse_complement()} -G ^{primer} -A {tpn} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-                )
+                cutadapt2 = f"-g ^{tpn.reverse_complement()} -a {primer.reverse_complement()} -G ^{primer} -A {tpn} "
             else:  # library == "IRR"
                 # IRR and tpn in reverse orientation against strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-g ^{primer.reverse_complement()} -a {tpn.reverse_complement()} -G ^{tpn} -A {primer} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-                )
+                cutadapt2 = f"-g ^{primer.reverse_complement()} -a {tpn.reverse_complement()} -G ^{tpn} -A {primer} "
+
         elif cutadapt_policy == 'high':
             if library == "IRL":
                 # IRL and tpn in reverse orientation against strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-a {tpn.reverse_complement()}...{primer.reverse_complement()} -A {primer}...{tpn} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-                )
+                cutadapt2 = f"-a {tpn.reverse_complement()}...{primer.reverse_complement()} -A {primer}...{tpn} "
             else:  # library == "IRR"
                 # IRR and tpn in reverse orientation against strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-a {primer.reverse_complement()}...{tpn.reverse_complement()} -A {tpn}...{primer} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-                )
+                cutadapt2 = f"-a {primer.reverse_complement()}...{tpn.reverse_complement()} -A {tpn}...{primer} "
+                
         else:  # cutadapt_policy == 'strict':
             if library == "IRL":
                 # IRL and tpn in reverse orientation against strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-a ^{tpn.reverse_complement()}...{primer.reverse_complement()} -A ^{primer}...{tpn} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-                )
+                cutadapt2 = f"-a ^{tpn.reverse_complement()}...{primer.reverse_complement()} -A ^{primer}...{tpn} "
             else:  # library == "IRR"
                 # IRR and tpn in reverse orientation against strand
-                cutadapt = (
-                    f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
-                    f"-a ^{primer.reverse_complement()}...{tpn.reverse_complement()} -A ^{tpn}...{primer} "
-                    f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
-                )
-                
+                cutadapt2 = f"-a ^{primer.reverse_complement()}...{tpn.reverse_complement()} -A ^{tpn}...{primer} "
+    
+    cutadapt = cutadapt1 + cutadapt2 + cutadapt3
+    
     run_preprocessing(
         cutadapt,
         ntask, genome_index_dir, trim1_f, trim1_r, pre_bam_file, bowtie_report, 

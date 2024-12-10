@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 import seaborn.objects as so
 from seaborn import axes_style, plotting_context
+from adjustText import adjust_text
 
 
 def load_args() -> dict:
@@ -102,6 +103,7 @@ def process_annot_file(df, marker_type, feature_type, verbose=0):
     # remove unused column
     df = df.drop("Status", axis=1)
     # remove genes that are heritable phenotypic markers to NaN
+    # TODO: need a more flexible way to choose marker and feature types with exclusion and inclusion params
     df = df[df['Feature Type'] != 'heritable phenotypic marker']
     # transform Chr column into "chr1" format and sort by Chr
     df["chrom"] = df["Chr"].apply(lambda x: f"chr{x}")
@@ -123,8 +125,7 @@ def process_annot_file(df, marker_type, feature_type, verbose=0):
     df = sort_chrom_pos(df, "chrom", "genome coordinate start")
     df["genome coordinate start"] = df["genome coordinate start"].apply(int)
     df["genome coordinate end"] = df["genome coordinate end"].apply(int)
-    # NOTE: for next version
-    # what about the strand in annot_df? Does this need to be considered for a CIS by separating by strand?
+    # TODO: what about the strand in annot_df? Does this need to be considered for a CIS by separating by strand?
     return df
 
 def annotate_cis(cis_df, annot_df, marker_expander):
@@ -164,7 +165,7 @@ def volcano_plot(df, pval, pval_thresh, lfc_thresh, title=""):
     )
     return g
 
-def matplot_volcano(ax, df, pval, pval_thresh, lfc_thresh, case, control, title="", add_text=False):
+def matplot_volcano(ax, df, pval, pval_thresh, lfc_thresh, case, control, title="", add_text=False, num_text=10):
     # https://hemtools.readthedocs.io/en/latest/content/Bioinformatics_Core_Competencies/Volcanoplot.html
     ax.scatter(x=df["LFC"], y=df[pval].apply(lambda x:-np.log10(x)), s=3, label="Not significant", color="grey")
 
@@ -176,15 +177,27 @@ def matplot_volcano(ax, df, pval, pval_thresh, lfc_thresh, case, control, title=
     ax.scatter(x=up['LFC'], y=up[pval].apply(lambda x: -np.log10(x)), s=10, label=f"{case}", color="gold")
 
     if add_text:
-        texts_up=[]
-        for i,r in up.iterrows():
-            texts_up.append(ax.text(x=r['LFC'], y=-np.log10(r[pval]), s=r["genes"]))
-        # adjust_text(texts,arrowprops=dict(arrowstyle="-", color='black', lw=0.5))
+        # Select the top 5 genes (most significant)
+        num_passing = len(df[df[pval] <= pval_thresh])
+        if num_passing < 5:
+            top_genes = pd.concat([up, down]).sort_values(pval).head(num_passing)
+        else:
+            top_genes = pd.concat([up, down]).sort_values(pval).head(num_text)
 
-        texts_down=[]
-        for i,r in down.iterrows():
-            texts_down.append(ax.text(x=r['LFC'], y=-np.log10(r[pval]), s=r["genes"]))
-        # adjust_text(texts,arrowprops=dict(arrowstyle="-", color='black', lw=0.5))
+        # Prepare annotation texts
+        texts = []
+        for _, row in top_genes.iterrows():
+            text = ax.text(x=row['LFC'], y=-np.log10(row[pval]), s=row["genes"], fontsize=8, color="black")
+            texts.append(text)
+
+        # Adjust text to avoid overlap
+        adjust_text(
+            texts,
+            ax=ax,
+            arrowprops=dict(arrowstyle="->", color="black", lw=0.5),
+            expand_points=(1.2, 1.4),  # Adjust the distance between text and points
+            force_text=0.8  # Adjust this to fine-tune text movement
+        )
 
     ax.set_xlabel("log2(FC)")
     ax.set_ylabel("-log10(pval)")
@@ -195,17 +208,17 @@ def matplot_volcano(ax, df, pval, pval_thresh, lfc_thresh, case, control, title=
     # else:
         # ax.axvline(lfc_thresh, color="grey", linestyle="--")
     ax.axhline(-np.log10(pval_thresh), color="grey", linestyle="--")
-    ax.legend(title="Enrichment")
+    ax.legend(title="Enrichment", loc="upper left")
 
 def plot_volcanoes(data_df, pval_threshold, case_group, control_group, output, return_fig=False):
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 12))
-    matplot_volcano(ax1, data_df, "ranksums", pval_threshold, 0, case_group, control_group, title="Rank-sum uncorrected")
-    matplot_volcano(ax2, data_df, "ranksums-BY", pval_threshold, 0, case_group, control_group, title="Rank-sum corrected")
-    matplot_volcano(ax3, data_df, "fishers_exact", pval_threshold, 0, case_group, control_group, title="Fishers exact uncorrected")
-    matplot_volcano(ax4, data_df, "fishers_exact-BY", pval_threshold, 0, case_group, control_group, title="Fishers exact corrected")
+    matplot_volcano(ax1, data_df, "ranksums", pval_threshold, 0, case_group, control_group, title="Rank-sum uncorrected", add_text=True)
+    matplot_volcano(ax2, data_df, "ranksums-BY", pval_threshold, 0, case_group, control_group, title="Rank-sum corrected", add_text=True)
+    matplot_volcano(ax3, data_df, "fishers_exact", pval_threshold, 0, case_group, control_group, title="Fishers exact uncorrected", add_text=True)
+    matplot_volcano(ax4, data_df, "fishers_exact-BY", pval_threshold, 0, case_group, control_group, title="Fishers exact corrected", add_text=True)
     ax2.set_ylim(ax1.get_ylim())
     ax4.set_ylim(ax3.get_ylim())
-    fig.savefig(output /"volcano_plots.pdf")
+    # fig.savefig(output /"volcano_plots.pdf")
     fig.savefig(output /"volcano_plots.svg")
     fig.savefig(output /"volcano_plots.png")
     if return_fig:
@@ -213,83 +226,6 @@ def plot_volcanoes(data_df, pval_threshold, case_group, control_group, output, r
     else:
         plt.close()
     
-def edit_tracks_config(track_file):
-    """
-        sometimes the variables are commented
-        sometimes they need to be uncommented and changed
-        or just changed
-        this will do all of that
-    """
-    # why comment out parts if you give it a true or false? just make it false...
-    # or just make this into JSON and use that. It's way better for a config file.
-    # Looks like the maintainers of pyGenomeTracks will change to something better in version 4.0 (next update)
-
-    vars_to_change = {
-        # 'title': None,  # make it shorter
-        'labels': 'labels = true',  # change to true
-        # 'style': 'UCSC',  # uncomment
-        'all_labels_inside': 'all_labels_inside = true',  # uncomment to true
-        'labels_in_margin': 'labels_in_margin = true',  # uncomment to true
-        # 'merge_transcripts': 'true',  # uncomment to true
-        # 'merge_overlapping_exons': 'true',  # uncomment to true
-        }
-
-    with open(track_file) as f:
-        lines = f.readlines()
-
-    header = None
-    out_lines = []
-    for line in lines:
-        # remove leading and trailing white space 
-        line_clean = line.strip()
-        new_line = line_clean
-        
-        # skip empty lines
-        if line_clean == "":
-            out_lines.append(new_line)
-            continue
-        
-        # check if line is a header - this tells us what config we are editing
-        if line_clean[0] == '[':
-            header = line_clean.strip('[').strip(']')
-            
-        # check if line is a variable
-        if line_clean.find("=") != -1:
-            
-            # get just the variable by removing comments and whitespace
-            curr_var = line_clean.strip('#').split('=')[0].strip()
-            
-            # check if the current variable is in the variables to change dictionary
-            if curr_var in vars_to_change:
-                # print(header, curr_var)
-                new_line = vars_to_change[curr_var]
-                
-                # # for special case of style
-                # if curr_var == 'style':
-                #     if line_clean.find("UCSC") != -1:
-                #         new_line = line_clean.strip('#')
-                # else:
-                #     new_line = vars_to_change[curr_var]
-                    
-        # if new_line != line_clean:
-        #     print(new_line, line_clean)
-            
-        out_lines.append(new_line)
-        
-    with open(track_file, 'w') as f:
-        f.write('\n'.join(out_lines))
-
-def edit_pyGV_file_names(pyGT_dir, top_df):
-    for row in top_df.itertuples():
-        file_name: Path = pyGT_dir / f'test_{row.chrom}-{row.CIS_start}-{row.CIS_end}.png'
-        is_annot = 'unannot' if not row.genes else 'annot'
-        new_name = pyGT_dir / f'{row.rank:03}-{is_annot}-{row.chrom}:{row.CIS_start}-{row.CIS_end}.png'
-        if not file_name.is_file():
-            print(f"error: file not found\n\t{file_name}")
-        else:
-            file_name.rename(new_name)
-
-
 def get_dist(m, i, j):
     # The metric dist(u=X[i], v=X[j]) is computed and stored in a condensed array whose entry is i < j < m
     # see scipy documentation for pdist for more info
@@ -385,60 +321,60 @@ def prepare_gene_set(gene_set_file, gene_set_output, sim_thresh=0.5, verbose=Fal
 def dot_plot_gse(df, treatment, output, col):
     fig, ax1 = plt.subplots(figsize=(8, 8))
     gp.dotplot(df, column=col, size=6, top_term=10, figsize=(6,8), title = f"Enrichement: {treatment}", cmap="viridis_r", ax=ax1)
-    fig.savefig(output / f"enrichr-dotplot-{treatment}.png")
-    fig.savefig(output / f"enrichr-dotplot-{treatment}.pdf")
-    fig.savefig(output / f"enrichr-dotplot-{treatment}.svg")
+    fig.savefig(output / f"enrichr-dotplot-{treatment}-{col}.png")
+    fig.savefig(output / f"enrichr-dotplot-{treatment}-{col}.pdf")
+    fig.savefig(output / f"enrichr-dotplot-{treatment}-{col}.svg")
     return fig
 
 def enrichment_plot_gse(df, treatment, output, col):
-        nodes, edges = gp.enrichment_map(df, column=col, top_term=20)
-        G = nx.from_pandas_edgelist(edges, source='src_idx', target='targ_idx', edge_attr=['jaccard_coef', 'overlap_coef', 'overlap_genes'])
+    nodes, edges = gp.enrichment_map(df, column=col, top_term=20)
+    G = nx.from_pandas_edgelist(edges, source='src_idx', target='targ_idx', edge_attr=['jaccard_coef', 'overlap_coef', 'overlap_genes'])
 
-        # Add missing node if there is any
-        for node in nodes.index:
-            if node not in G.nodes():
-                G.add_node(node)
-                
-        fig, ax = plt.subplots(figsize=(8, 8))
+    # Add missing node if there is any
+    for node in nodes.index:
+        if node not in G.nodes():
+            G.add_node(node)
+            
+    fig, ax = plt.subplots(figsize=(8, 8))
 
-        # init node cooridnates
-        # pos=nx.layout.shell_layout(G)
-        pos=nx.layout.kamada_kawai_layout(G)
+    # init node cooridnates
+    # pos=nx.layout.shell_layout(G)
+    pos=nx.layout.kamada_kawai_layout(G)
 
-        # draw nodes
-        node_size = list(nodes.Hits_ratio*1000)
-        node_color = list(nodes['P-value'])
-        net_nodes = nx.draw_networkx_nodes(G, pos=pos, cmap='RdYlBu', node_color=node_color, node_size=node_size, ax=ax)
-        # make legends
-        legend1 = ax.legend(
-            *net_nodes.legend_elements("sizes", num=4),
-            loc="upper right",
-            title="Hits ratio\n* 1000",
-            bbox_to_anchor=(1.16, 1),
-            borderpad=1,
-            labelspacing=2.5,
-            )
-        ax.add_artist(legend1)
-        legend2 = ax.legend(*net_nodes.legend_elements("colors"), loc="lower right", title="P-value", bbox_to_anchor=(1.15, 0))
+    # draw nodes
+    node_size = list(nodes.Hits_ratio*1000)
+    node_color = list(nodes['P-value'])
+    net_nodes = nx.draw_networkx_nodes(G, pos=pos, cmap='RdYlBu', node_color=node_color, node_size=node_size, ax=ax)
+    # make legends
+    legend1 = ax.legend(
+        *net_nodes.legend_elements("sizes", num=4),
+        loc="upper right",
+        title="Hits ratio\n* 1000",
+        bbox_to_anchor=(1.16, 1),
+        borderpad=1,
+        labelspacing=2.5,
+        )
+    ax.add_artist(legend1)
+    legend2 = ax.legend(*net_nodes.legend_elements("colors"), loc="lower right", title="P-value", bbox_to_anchor=(1.15, 0))
 
-        # draw node labels
-        labels = nodes.Term.to_dict()
-        nx.draw_networkx_labels(G, pos=pos, labels=labels, font_size=8, ax=ax)
+    # draw node labels
+    labels = nodes.Term.to_dict()
+    nx.draw_networkx_labels(G, pos=pos, labels=labels, font_size=8, ax=ax)
 
-        # draw edges
-        edge_weight = nx.get_edge_attributes(G, 'jaccard_coef').values()
-        width = list(map(lambda x: x*10, edge_weight))
-        nx.draw_networkx_edges(G, pos=pos, width=width, edge_color='#CDDBD4', ax=ax)
-        plt.tight_layout()
-        
-        fig.savefig(output / f"enrichr-netowrk-{treatment}.png")
-        fig.savefig(output / f"enrichr-netowrk-{treatment}.pdf")
-        fig.savefig(output / f"enrichr-netowrk-{treatment}.svg")
-        
-        # save to GraphML format if someone wants to use Cytoscape
-        nx.write_graphml(G, output / f'{treatment}.graphml')
-        
-        return fig
+    # draw edges
+    edge_weight = nx.get_edge_attributes(G, 'jaccard_coef').values()
+    width = list(map(lambda x: x*10, edge_weight))
+    nx.draw_networkx_edges(G, pos=pos, width=width, edge_color='#CDDBD4', ax=ax)
+    plt.tight_layout()
+    
+    fig.savefig(output / f"enrichr-netowrk-{treatment}-{col}.png")
+    fig.savefig(output / f"enrichr-netowrk-{treatment}-{col}.pdf")
+    fig.savefig(output / f"enrichr-netowrk-{treatment}-{col}.svg")
+    
+    # save to GraphML format if someone wants to use Cytoscape
+    nx.write_graphml(G, output / f'{treatment}.graphml')
+    
+    return fig
 
 def run_gse(candidate_df, treatment, gene_sets, background, output, return_fig=False):
     
@@ -454,42 +390,118 @@ def run_gse(candidate_df, treatment, gene_sets, background, output, return_fig=F
     res_df : pd.DataFrame = enrichment.results.sort_values(['Adjusted P-value', 'P-value'])
     res_df.to_csv(output / f"enrichr-results-{treatment}.tsv", sep='\t')
     
+    
     # dot plot
+    fig1_adj, fig1_unadj = None, None
     try:
-        fig1 = dot_plot_gse(res_df, treatment, output, "Adjusted P-value")
-        plt.close(fig1)
+        fig1_adj = dot_plot_gse(res_df, treatment, output, "Adjusted P-value")
+        plt.close(fig1_adj)
     except Exception as e:
         print(f"Error in gp.dotplot()\n\t{e}")
-        print("\tTrying with un-adjusted p-value...", end='')
-        try:
-            fig1 = dot_plot_gse(res_df, treatment, output, "P-value")
-            print("success")
-            plt.close(fig1)
-        except Exception as e:
-            print("failure")
-            print(f"Error in gp.dotplot()\n\t{e}")
-            print("No dot plot can be created")
-            fig1 = None
-    
-    # build graph
+        print("\tNo results with 'Adjusted P-value'")
     try:
-        fig2 = enrichment_plot_gse(res_df, treatment, output, "Adjusted P-value")
-        plt.close(fig2)
+        fig1_unadj = dot_plot_gse(res_df, treatment, output, "P-value")
+        plt.close(fig1_unadj)
+    except Exception as e:
+        print(f"Error in gp.dotplot()\n\t{e}")
+        print("\tNo results with 'P-value'")
+
+    
+        
+    # build graph
+    fig2_adj, fig2_unadj = None, None
+    try:
+        fig2_adj = enrichment_plot_gse(res_df, treatment, output, "Adjusted P-value")
+        plt.close(fig2_adj)
     except Exception as e:
         print(f"Error in gp.enrichment_map()\n\t{e}")
-        print("\tTrying with un-adjusted p-value...", end='')
-        try:
-            fig2 = enrichment_plot_gse(res_df, treatment, output, "P-value")
-            print("success")
-            plt.close(fig2)
-        except Exception as e:
-            print("failure")
-            print(f"Error in gp.enrichment_map()\n\t{e}")
-            print("No enrichment plot can be created")
-            fig2 = None
+        print("\tNo results with 'Adjusted P-value'")
+    try:
+        fig2_unadj = enrichment_plot_gse(res_df, treatment, output, "P-value")
+        plt.close(fig2_unadj)
+    except Exception as e:
+        print(f"Error in gp.enrichment_map()\n\t{e}")
+        print("\tNo results with 'P-value'")
     
     if return_fig:
-        return (fig1, fig2)
+        return fig1_adj, fig1_unadj, fig2_adj, fig2_unadj
+    
+def edit_tracks_config(track_file):
+    """
+        sometimes the variables are commented
+        sometimes they need to be uncommented and changed
+        or just changed
+        this will do all of that
+    """
+    # why comment out parts if you give it a true or false? just make it false...
+    # or just make this into JSON and use that. It's way better for a config file.
+    # Looks like the maintainers of pyGenomeTracks will change to something better in version 4.0 (next update)
+
+    vars_to_change = {
+        # 'title': None,  # make it shorter
+        'labels': 'labels = true',  # change to true
+        # 'style': 'UCSC',  # uncomment
+        'all_labels_inside': 'all_labels_inside = true',  # uncomment to true
+        'labels_in_margin': 'labels_in_margin = true',  # uncomment to true
+        # 'merge_transcripts': 'true',  # uncomment to true
+        # 'merge_overlapping_exons': 'true',  # uncomment to true
+        }
+
+    with open(track_file) as f:
+        lines = f.readlines()
+
+    header = None
+    out_lines = []
+    for line in lines:
+        # remove leading and trailing white space 
+        line_clean = line.strip()
+        new_line = line_clean
+        
+        # skip empty lines
+        if line_clean == "":
+            out_lines.append(new_line)
+            continue
+        
+        # check if line is a header - this tells us what config we are editing
+        if line_clean[0] == '[':
+            header = line_clean.strip('[').strip(']')
+            
+        # check if line is a variable
+        if line_clean.find("=") != -1:
+            
+            # get just the variable by removing comments and whitespace
+            curr_var = line_clean.strip('#').split('=')[0].strip()
+            
+            # check if the current variable is in the variables to change dictionary
+            if curr_var in vars_to_change:
+                # print(header, curr_var)
+                new_line = vars_to_change[curr_var]
+                
+                # # for special case of style
+                # if curr_var == 'style':
+                #     if line_clean.find("UCSC") != -1:
+                #         new_line = line_clean.strip('#')
+                # else:
+                #     new_line = vars_to_change[curr_var]
+                    
+        # if new_line != line_clean:
+        #     print(new_line, line_clean)
+            
+        out_lines.append(new_line)
+        
+    with open(track_file, 'w') as f:
+        f.write('\n'.join(out_lines))
+
+def edit_pyGV_file_names(pyGT_dir, top_df):
+    for row in top_df.itertuples():
+        file_name: Path = pyGT_dir / f'test_{row.chrom}-{row.CIS_start}-{row.CIS_end}.png'
+        is_annot = 'unannot' if not row.genes else 'annot'
+        new_name = pyGT_dir / f'{row.rank:03}-{is_annot}-{row.chrom}:{row.CIS_start}-{row.CIS_end}.png'
+        if not file_name.is_file():
+            print(f"error: file not found\n\t{file_name}")
+        else:
+            file_name.rename(new_name)
+
     
 def main(args):
     cis_dir: Path = args["CIS_dir"]

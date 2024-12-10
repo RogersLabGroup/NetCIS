@@ -7,4 +7,4 @@ set -o pipefail
 conda env export > requirements.yml
 
 # create environment in conda with 
-# conda create --name netcis --file requirements.yml
+# conda env create --name netcis --file requirements.yml
