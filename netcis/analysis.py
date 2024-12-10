@@ -319,10 +319,11 @@ def prepare_gene_set(gene_set_file, gene_set_output, sim_thresh=0.5, verbose=Fal
     return gene_sets, filtered_gene_sets, final_gene_sets
 
 def dot_plot_gse(df, treatment, output, col):
-    fig, ax1 = plt.subplots(figsize=(8, 8))
-    gp.dotplot(df, column=col, size=6, top_term=10, figsize=(6,8), title = f"Enrichement: {treatment}", cmap="viridis_r", ax=ax1)
+    fig, ax = plt.subplots(figsize=(8, 8))
+    gp.dotplot(df, column=col, size=6, top_term=10, figsize=(6,8), title = f"Enrichement: {treatment}", cmap="viridis_r", ax=ax)
+    
     fig.savefig(output / f"enrichr-dotplot-{treatment}-{col}.png")
-    fig.savefig(output / f"enrichr-dotplot-{treatment}-{col}.pdf")
+    # fig.savefig(output / f"enrichr-dotplot-{treatment}-{col}.pdf")
     fig.savefig(output / f"enrichr-dotplot-{treatment}-{col}.svg")
     return fig
 
@@ -330,22 +331,22 @@ def enrichment_plot_gse(df, treatment, output, col):
     nodes, edges = gp.enrichment_map(df, column=col, top_term=20)
     G = nx.from_pandas_edgelist(edges, source='src_idx', target='targ_idx', edge_attr=['jaccard_coef', 'overlap_coef', 'overlap_genes'])
 
-    # Add missing node if there is any
+    # Add missing nodes if there are any
     for node in nodes.index:
         if node not in G.nodes():
             G.add_node(node)
             
     fig, ax = plt.subplots(figsize=(8, 8))
 
-    # init node cooridnates
-    # pos=nx.layout.shell_layout(G)
-    pos=nx.layout.kamada_kawai_layout(G)
+    # Initialize node coordinates
+    pos = nx.layout.kamada_kawai_layout(G)
 
-    # draw nodes
-    node_size = list(nodes.Hits_ratio*1000)
+    # Draw nodes
+    node_size = list(nodes.Hits_ratio * 1000)
     node_color = list(nodes['P-value'])
     net_nodes = nx.draw_networkx_nodes(G, pos=pos, cmap='RdYlBu', node_color=node_color, node_size=node_size, ax=ax)
-    # make legends
+
+    # Create legends
     legend1 = ax.legend(
         *net_nodes.legend_elements("sizes", num=4),
         loc="upper right",
@@ -353,25 +354,39 @@ def enrichment_plot_gse(df, treatment, output, col):
         bbox_to_anchor=(1.16, 1),
         borderpad=1,
         labelspacing=2.5,
-        )
+    )
     ax.add_artist(legend1)
     legend2 = ax.legend(*net_nodes.legend_elements("colors"), loc="lower right", title="P-value", bbox_to_anchor=(1.15, 0))
 
-    # draw node labels
-    labels = nodes.Term.to_dict()
-    nx.draw_networkx_labels(G, pos=pos, labels=labels, font_size=8, ax=ax)
-
-    # draw edges
+    # Draw edges
     edge_weight = nx.get_edge_attributes(G, 'jaccard_coef').values()
-    width = list(map(lambda x: x*10, edge_weight))
+    width = list(map(lambda x: x * 10, edge_weight))
     nx.draw_networkx_edges(G, pos=pos, width=width, edge_color='#CDDBD4', ax=ax)
+
+    # Annotate labels dynamically with adjust_text
+    # ChatGPT used for this part
+    labels = nodes.Term.to_dict()
+    texts = []
+    for node, label in labels.items():
+        x, y = pos[node]
+        texts.append(ax.text(x, y, label, fontsize=8))
+
+    adjust_text(
+        texts,
+        ax=ax,
+        arrowprops=dict(arrowstyle="->", color="black", lw=0.5),
+        # force_text=0.8,  # Adjusts how far text can move
+        # expand_points=(1.2, 1.4),  # Pushes text further from nodes
+        avoid_self=True
+    )
+
     plt.tight_layout()
     
-    fig.savefig(output / f"enrichr-netowrk-{treatment}-{col}.png")
-    fig.savefig(output / f"enrichr-netowrk-{treatment}-{col}.pdf")
-    fig.savefig(output / f"enrichr-netowrk-{treatment}-{col}.svg")
+    # Save the plot in multiple formats
+    fig.savefig(output / f"enrichr-network-{treatment}-{col}.png")
+    fig.savefig(output / f"enrichr-network-{treatment}-{col}.svg")
     
-    # save to GraphML format if someone wants to use Cytoscape
+    # Save to GraphML format for Cytoscape
     nx.write_graphml(G, output / f'{treatment}.graphml')
     
     return fig
