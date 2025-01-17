@@ -212,10 +212,10 @@ def matplot_volcano(ax, df, pval, pval_thresh, lfc_thresh, case, control, title=
 
 def plot_volcanoes(data_df, pval_threshold, case_group, control_group, output, return_fig=False):
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 12))
-    matplot_volcano(ax1, data_df, "ranksums", pval_threshold, 0, case_group, control_group, title="Rank-sum uncorrected", add_text=True)
-    matplot_volcano(ax2, data_df, "ranksums-BY", pval_threshold, 0, case_group, control_group, title="Rank-sum corrected", add_text=True)
-    matplot_volcano(ax3, data_df, "fishers_exact", pval_threshold, 0, case_group, control_group, title="Fishers exact uncorrected", add_text=True)
-    matplot_volcano(ax4, data_df, "fishers_exact-BY", pval_threshold, 0, case_group, control_group, title="Fishers exact corrected", add_text=True)
+    matplot_volcano(ax1, data_df, "ranksums", pval_threshold, 0, case_group, control_group, title="Rank-sum marginal significant CIS", add_text=True)
+    matplot_volcano(ax2, data_df, "ranksums-BY", pval_threshold, 0, case_group, control_group, title="Rank-sum significant CIS", add_text=True)
+    matplot_volcano(ax3, data_df, "fishers_exact", pval_threshold, 0, case_group, control_group, title="Fishers exact marginal significant CIS", add_text=True)
+    matplot_volcano(ax4, data_df, "fishers_exact-BY", pval_threshold, 0, case_group, control_group, title="Fishers exact significant CIS", add_text=True)
     ax2.set_ylim(ax1.get_ylim())
     ax4.set_ylim(ax3.get_ylim())
     # fig.savefig(output /"volcano_plots.pdf")
@@ -320,7 +320,7 @@ def prepare_gene_set(gene_set_file, gene_set_output, sim_thresh=0.5, verbose=Fal
 
 def dot_plot_gse(df, treatment, output, col):
     fig, ax = plt.subplots(figsize=(8, 8))
-    gp.dotplot(df, column=col, size=6, top_term=10, figsize=(6,8), title = f"Enrichement: {treatment}", cmap="viridis_r", ax=ax)
+    gp.dotplot(df, column=col, size=10, top_term=10, figsize=(6,8), title = f"Enrichement: {treatment}", cmap="viridis_r", ax=ax)
     
     fig.savefig(output / f"enrichr-dotplot-{treatment}-{col}.png")
     # fig.savefig(output / f"enrichr-dotplot-{treatment}-{col}.pdf")
@@ -395,7 +395,7 @@ def run_gse(candidate_df, treatment, gene_sets, background, output, return_fig=F
     
     enriched_df = candidate_df[candidate_df['enriched'] == treatment]
     gene_df1 = enriched_df.explode("genes").reset_index(drop=True).copy(deep=True)
-    gene_df2 = gene_df1[~gene_df1['genes'].isna()]
+    gene_df2 = gene_df1[~gene_df1['genes'].isna()].sort_values('rank')[:100]
     enriched_genes = set(gene_df2['genes'].to_list())
     gene_list = list(enriched_genes)
     print(f"number of enriched genes in {treatment}: {len(enriched_genes)}")
@@ -601,10 +601,12 @@ def main(args):
 
     # candidate genes
     gene_df1 = candidate_df.explode("genes", ignore_index=True)
-    gene_df2 = gene_df1[~gene_df1['genes'].isna()]
+    gene_df2 = gene_df1[~gene_df1['genes'].isna()].sort_values('rank')
     candidate_genes = set(gene_df2['genes'].to_list())
     if verbose:
         print(f"number of candidate genes: {len(candidate_genes)}")
+        
+    # TODO: save candidate genes list to file
 
     # background gene set
     background_gene_list = data_df.explode("genes", ignore_index=True)['genes'].dropna().unique().tolist()

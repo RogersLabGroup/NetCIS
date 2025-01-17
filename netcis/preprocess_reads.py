@@ -286,7 +286,8 @@ def main() -> None:
                 p.join()  # Wait for all worker processes to finish
                 
     # end to ChatGPT suggested code
-
+    if main_args['verbose']:
+        print()
 
 
 if __name__ == "__main__":

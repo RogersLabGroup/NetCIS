@@ -40,7 +40,8 @@ def load_args() -> dict:
         print("\n")
         
     args["insertion_dir"] = Path(args["output_prefix"] + "-insertions")
-    args["depth_dir"] = Path(args["output_prefix"] + "-insertions-depth")
+    args["strand_dir"] = Path(args["output_prefix"] + "-insertions-strand")
+    args["tpn_orient_dir"] = Path(args["output_prefix"] + "-insertions-strand-tpn_orient")
     args["output"] = Path(args["output_prefix"] + "-graphs")
 
     return args
@@ -192,7 +193,7 @@ def main(args) -> None:
     verbose = args["verbose"]
     
     # get all files in data dir, load each file as pandas.DataFrame
-    insertion_list = [ pd.read_pickle(file) for file in args["depth_dir"].iterdir() ]
+    insertion_list = [ pd.read_pickle(file) for file in args["strand_dir"].iterdir() ]
     inserts_df = pd.concat(insertion_list, ignore_index=True)
     inserts_df.insert(4, "counts_irr", np.where(inserts_df['library'] == 'IRR', 1, 0))
     inserts_df.insert(5, "counts_irl", np.where(inserts_df['library'] == 'IRL', 1, 0))

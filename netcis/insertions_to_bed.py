@@ -76,6 +76,12 @@ def main(args):
     inserts_df.loc[inserts_df[inserts_df['strand'] == inserts_df['tpn_promoter_orient']].index, 'strand_color'] = "44,123,182"
     # color blind safe red if they don't matched
     inserts_df.loc[inserts_df[inserts_df['strand'] != inserts_df['tpn_promoter_orient']].index, 'strand_color'] = "215,25,28"
+    
+    # add negative flag for coloring in IGV
+    inserts_df['neg_flag'] = ''
+    inserts_df.loc[inserts_df[inserts_df['strand'] == inserts_df['tpn_promoter_orient']].index, 'neg_flag'] = 1
+    inserts_df.loc[inserts_df[inserts_df['strand'] != inserts_df['tpn_promoter_orient']].index, 'neg_flag'] = -1
+
 
     # save bed files for each treatment and strand
     for treatment in inserts_df['treatment'].unique():
@@ -84,14 +90,14 @@ def main(args):
                 print(f"Creating bed file for treatment: {treatment}, and strand: {strand}")
             treatment_df = inserts_df[(inserts_df["treatment"] == treatment) & (inserts_df["strand"] == strand)].copy()
             # treatment_strand_grouped_df = treatment_strand_df.groupby(["chr", "pos"])['CPM'].sum()
-            treatment_df['CPM_score'] = (treatment_df['CPM'] / treatment_df['CPM'].max()) * 1000
+            treatment_df['CPM_score'] = (treatment_df['CPM'] / treatment_df['CPM'].max()) * 1000 * treatment_df['neg_flag']
             treatment_df = sort_chrom_pos(treatment_df, 'chr', 'pos')
 
             out_df = pd.DataFrame(treatment_df["chr"])
             out_df.columns = ["chrom"]
             out_df["chromStart"] = treatment_df["pos"]-1  # 0-index based
             out_df["chromEnd"] = treatment_df["pos"]  # ending not inclusive
-            out_df["name"] = ''
+            out_df["name"] = 'N/A'
             out_df["score"] = treatment_df['CPM_score']
             out_df["strand"] = treatment_df["strand"]
             out_df["thickStart"] = 0  # out_df["chromStart"]-1

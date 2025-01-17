@@ -162,21 +162,24 @@ def group_insertions(inserts_df, total_reads, reads_per_chrom):
     strand_lib_df = None
     tpn_orient_lib_df = None
     if (inserts_df is not None):
+        if len(inserts_df) == 0:
+            return strand_lib_df, tpn_orient_lib_df
         # use depth (CPM) for insertion files
         # divide each insertion site by the total reads on that chromosome
         inserts_df["count"] = 0  # irrelevant what this holds, it's just a count in the next line
         strand_lib_df = inserts_df.groupby(
             by=["chr", "pos", "strand", "library"], sort=False, as_index=False, dropna=False
             ).count()[["chr", "pos", "strand", "library", "count"]]
+        # TODO: 12/27/24 - should CPM be split by strand?
         strand_lib_df["CPM"] = strand_lib_df.apply(lambda x: (x["count"] / total_reads) * 1e5, axis=1)
-        strand_lib_df["chrom_norm"] = strand_lib_df.apply(lambda x: x["count"] / (reads_per_chrom[x["chr"]]), axis=1)
+        strand_lib_df["chrom_norm"] = strand_lib_df.apply(lambda x: x["count"] / reads_per_chrom[x["chr"]], axis=1)
         
         # use depth (CPM) and strand and transposon orientation for insertion file
         tpn_orient_lib_df = inserts_df.groupby(
             by=["chr", "pos", "strand", "tpn_promoter_orient", "library"], sort=False, as_index=False, dropna=False
             ).count()[["chr", "pos", "strand", "tpn_promoter_orient", "library", "count"]]
         tpn_orient_lib_df["CPM"] = tpn_orient_lib_df.apply(lambda x: (x["count"] / total_reads) * 1e5, axis=1)
-        tpn_orient_lib_df["chrom_norm"] = tpn_orient_lib_df.apply(lambda x: x["count"] / (reads_per_chrom[x["chr"]]), axis=1)
+        tpn_orient_lib_df["chrom_norm"] = tpn_orient_lib_df.apply(lambda x: x["count"] / reads_per_chrom[x["chr"]], axis=1)
     return strand_lib_df, tpn_orient_lib_df
     
 def get_total_reads(prefilter_bam_file):
