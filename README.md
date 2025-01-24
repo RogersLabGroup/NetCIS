@@ -26,8 +26,7 @@ Then, make a directory to download NetCIS and related tutorial files to. NetCIS 
 mkdir netcis_tutorial
 cd netcis_tutorial
 git clone git@github.com:FischyM/NetCIS.git
-cd NetCIS
-conda env create --name netcis --file requirements.yml
+conda env create --name netcis --file NetCIS/requirements.yml
 conda activate netcis
 ```
 
@@ -37,10 +36,8 @@ Download input files from Zenodo
 
 ```
 
-Download fastq files from NCBI BioProject
-
-first download ncbi command line tools
+Download fastq files from NCBI BioProject. The conda environment already has NCBI's command line tools installed for this next step.
 
 ```bash
-conda install -c conda-forge ncbi-datasets-cli
+
 ```
