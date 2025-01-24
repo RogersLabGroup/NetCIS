@@ -1,95 +1,46 @@
+# NetCIS: Network-based Common Insertion Site analysis
 
-# NetCIS
+Forward genetic screens have become powerful tools for biological discoveries as they do not require any a priori knowledge of genes controlling a phenotype of interest. Sleeping Beauty (SB) has become a tool that can cause gain and loss of gene function with its ability to insert a DNA transposon at any TA dinucleotide site and has become a tool used to recapitulate hematopoietic and epithelial malignancies that mimic human tumors. Many tools have been created to identify which mutational insertions are driving these generated malignancies, deemed Common Insertion Sites (CIS), however, none currently implement case-control comparisons in a direct data-driven way. We have developed NetCIS: a Network-based Common Insertion Site analysis tool to robustly identify CIS in a case-control phenotype selection screen.
 
-Network based Common Insertional Site analysis
+NetCIS uses mathematical graphs to identify pseudo-CIS (pCIS) in case and control samples. These pCIS are used to determine a CIS, where a case pCIS overlaps with a control pCIS, or in a situation where there is no overlap in a pCIS. Overlapping pCISes are tested for significance in their read counts per insertion sites with the Wilcoxon rank sums test as well as the number of sample cases and controls that are found in the pCIS using the Fisher exact test. We prioritize a data-driven approach and do not require that insertions are annotated to a reference TA site nor that a CIS is annotated to a gene or other genomic feature. 
+
+We tested NetCIS on a previously published SB screen that used mutagenized T Cells to identify CIS mutations that can improve intratumoral trafficking. We were able to recapitulate in our top ranked CIS the previously validated genes Ehhadh, Sprr1b, and Aak1, in addition to discovering novel annotated CIS to microRNA 101c and the protein tyrosine phosphatase receptor type D (Ptprd), along with many unannotated CIS that would have been missed by other methods.
+
+NetCIS code and accompanying tutorial can be found at https://github.com/FischyM/NetCIS.
 
 ## Requirements
 
-- It is assummed that the SB screen has been prepared as per LM-PCR protocol [TODO: link] and the fastq files are have IRL/IRR libraries and are sequenced with Illumina's short-read paired-end technology.
-- Compute environment
-  - NetCIS has only been tested on Linux TODO:
-- Computer with enough storage space for fastq files and generated intermediate and result files
+A Linux x86_64 computer with a minimum of 8 cores and 32 GB RAM (we recommended 32 cores and 196 GB RAM)
 
-## Clone from github
+Users should have a basic knowledge of Linux command line and will benefit with knowledge of Conda and Python.
 
-[Github Repo](https://github.com/FischyM/NetCIS)
+NetCIS has been tested on Ubuntu 22.04.1, with 32 cores and 192 GB RAM. It is possible to run NetCIS with less computational resources, however, more resources (i.e., more cores) will lead to faster run times. There is no gurantee for NetCIS to run on other operating systems.
+
+## Setup
+
+If not already installed, download and install Conda following this documentation <https://docs.anaconda.com/miniconda/install/#quick-command-line-install>
+
+Then, make a directory to download NetCIS and related tutorial files to. NetCIS can be obtained with the following command. Once downloaded, you can recreate the netcis environment with conda.
 
 ```bash
+mkdir netcis_tutorial
+cd netcis_tutorial
 git clone git@github.com:FischyM/NetCIS.git
-```
-
-## Create python environment
-
-```bash
-conda create -n netcis -c bioconda -c conda-forge python=3.11 numpy pandas scipy networkx seaborn docopt jupyterlab tqdm Biopython gseapy pygenometracks pysam cutadapt, bowtie2, and samtools
+cd NetCIS
+conda env create --name netcis --file requirements.yml
 conda activate netcis
 ```
 
-Jupyterlab is optional and can be installed as needed.
-
-## Prepare data
-
-Data should be fastq files directly from sequencing. Preprocessing of the data happens in preprocess_reads.py where the following is done:
-
-- remove adaptor tags from the reads (cutadapt)
-- map reads to reference genome (bowtie2)
-- process insertions
-- save individual insertions per fastq file
-
-## Input files
-
-- fastq files
-  - can be obtained from TODO:
-- input file of fastq files
-  - the following columns are sample_id, IRL_read1, IRL_read2, IRR_read1, IRR_read2, treatment, optional_columns, etc
-    - first 6 columns are required
-    - sample_id MUST be unique and does not need to be meaningful
-    - optional_columns allows you to add any extra columns and they will propagate throughout NetCIS. For example, we have added tumor_model and pd1_treated
-- reference mapping file for bowtie2
-  - we have created our own GRCm39 reference mapping file with conventional contig names (chr1, chr2, etc.) and it can be obtained from our Zenodo repository TODO:
-  - GRCm39 <https://www.ncbi.nlm.nih.gov/assembly/GCF_000001635.27/>
-  - <https://genome.ucsc.edu/cgi-bin/hgTracks?chromInfoPage=&hgsid=1560703641_1YwiSDzyFEZ8nuDrTobTnwtYvReT>
-- gene annotation <https://www.informatics.jax.org/genes.shtml> 7/10/2023
-  - <https://www.informatics.jax.org/downloads/reports/MRK_List2.rpt>
-
-## Limitations
-
-
-
-## Other Preprocessing Things
-
-/project/cs-myers/MathewF/software/bowtie2-2.4.5/indexes
-
-- download reference genome
-- keep only major chromosomes
-- concatenate individual chromosomes into one file
-- create mapper index from ref genome (bowtie2)
-- find all TA dimer sites in ref genome chroms into .bed format (seqkit)
-
-# build index for bowtie2, hisat2, minimap2 for all the contigs and just the main contigs
-
-UCSC - <https://hgdownload.soe.ucsc.edu/goldenPath/mm39/bigZips/>
+Download input files from Zenodo
 
 ```bash
-mm39.fa.gz, mm39.chromFa.tar.gz
+
 ```
 
-How to process keep only chromosomes 1-22,X,Y - <https://www.biostars.org/p/113126/>
+Download fastq files from NCBI BioProject
+
+first download ncbi command line tools
 
 ```bash
-echo "$(ls chr*.fa | sort -V | grep -vP 'chr[^X|Y|\d]'; ls chr*.fa | sort -V | grep -vP 'chr[\d|X|Y]')" | xargs cat > GRCm39.fa
-
-cd /project/cs-myers/MathewF/software/bowtie2-2.4.5/indexes/GRCm39_major
+conda install -c conda-forge ncbi-datasets-cli
 ```
-
-# Disclosures
-
-ChatGPT 3.5 used to assist in generating per-function documentation to be used with Sphinx to generate full html documentation.
-
-Input: Provide documentation for this code similar to how scikit-learn does - (python file for documentation)
-
-Output: Sure, here's a structured documentation for the provided code, similar to how scikit-learn documents its functions and classes:
-
-Input: I need documentation for every function
-
-Output: Certainly, here's the documentation for each function in your code:
