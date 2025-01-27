@@ -10,10 +10,7 @@ conda env export > requirements.yml
 # conda env create --name netcis --file requirements.yml
 
 
-
-# conda install
-# python=3.11 numpy pandas seaborn biopython tqdm docopt pysam scipy 
-# scikit-learn networkx adjusttext gseapy jupyterlab entrez-direct sra-tools
-
-# pip install
-# ranky
+# conda config --add channels bioconda
+# conda config --add channels conda-forge
+# conda create -n netcis python=3.11 numpy pandas seaborn biopython tqdm docopt pysam scipy scikit-learn networkx adjusttext gseapy jupyterlab entrez-direct sra-tools
+# pip install ranky
