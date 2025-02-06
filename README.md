@@ -51,7 +51,7 @@ Download input files from Zenodo
 ```bash
 mkdir input_files
 cd input_files
-TODO:
+zenodo_get 14733375
 ```
 
 Extract archive (this might take some time). All extracted files will require 100 GB of space. This will temporarily use about 200 GB of space, but once extracted the archive can be deleted to save space.
@@ -131,3 +131,49 @@ python NetCIS/netcis/analysis.py -o output/results -a LT -b S -g input_files/MRK
 ```
 
 Results are separated by the combination of case (LT) and control (S) and edge threshold (20000) and in this instance can be found in output/results-analysis/LT-S/20000
+
+Each subdirectory of results has the following structure:
+
+- gene_set_enrichment_{case}/ (plots for case specific gene set enrichment)
+- gene_set_enrichment_{control}/ (plots for control specific gene set enrichment)
+- pyGT_helper/ (contains files to help build plots in pyGT_top_CIS)
+- pyGT_top_CIS/ (genome track plots of the top CIS)
+- volcano_plots/ (.png and .svg of the resulting volcano plots for rank sums and fisher's exact tests)
+- CIS.tsv (Results for all common insertion sites with the following structure)
+  - case_index: index for the case pCIS graph
+  - case_pos_min: minimum genomic position for case pCIS graph
+  - case_pos_max: maximum genomic position for case pCIS graph
+  - control_index: index for the control pCIS graph
+  - control_pos_min: minimum genomic position for control pCIS graph
+  - control_pos_max: maximum genomic position for control pCIS graph
+  - LFC: Log2 fold change of case/control read count (count per million)
+  - ranksums: Rank sum statistical test, 2 sided
+  - binomial: binomial statistical test, 2 sided
+  - fishers_exact: fisher's exact statistical test, 2 sided
+  - total_num_samples: total number of samples in CIS
+  - case_num_samples: total number of case samples in CIS
+  - control_num_samples: total number of control samples in CIS
+  - total_IS: total number of insertion sites (unique genomic positions)
+  - case_IS: total number of case insertion sites
+  - control_IS: total number of control insertion sites
+  - total_read_count: total read count as count per million
+  - case_total_read_count: total read count from case samples
+  - control_total_read_count: total read count from control samples
+  - case: name of case group
+  - control: name of control group
+  - chrom: chromosome of CIS
+  - genes: genes annotated to this CIS
+  - ranksums-neglog: negative log of rank sums
+  - fishers_exact-neglog: negative log of fisher's exact
+  - binomial-neglog: negative log of binomial
+  - ranksums-BY: rank sums corrected for multiple hypothesis testing using Benjaminini-Yekutieli method
+  - fishers_exact-BY: fisher's exact corrected for multiple hypothesis testing using Benjaminini-Yekutieli method
+  - binomial-BY: binomial corrected for multiple hypothesis testing using Benjaminini-Yekutieli method
+  - ranksums-BY-neglog: negative log of corrected rank sums
+  - fishers_exact-BY-neglog: negative log of corrected fisher's exact
+  - binomial-BY-neglog: negative log of corrected binomial
+  - rank: calculated Borda count rank using the median method
+  - enriched: which group has more reads, case or control
+  - CIS_start: genomic location of the beginning of the CIS
+  - CIS_end: genomic location of the ending of the CIS
+  - genome_viewer: string that is used to find the specific CIS in a genome viewer application
