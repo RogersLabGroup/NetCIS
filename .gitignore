@@ -8,6 +8,7 @@ find_TAs.sh
 example_run.sh
 README-old.md
 download_sra_runs.sh
+run_2020_SB.sh
 
 pseudo_code.md
 nohup.out
