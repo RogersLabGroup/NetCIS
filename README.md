@@ -90,9 +90,13 @@ python NetCIS/netcis/preprocess_reads.py --help
 
 ```bash
 python NetCIS/netcis/preprocess_reads.py -d input_files/2020_SB/ -o output/results -b input_files/GRCm39 -i input_files/2020_SB.tsv -l AAATTTGTGGAGTAGTTGAAAAACGAGTTTTAATGACTCCAACTTAAGTGTATGTAAACTTCCGACTTCAACTG -r GGATTAAATGTCAGGAATTGTGAAAAAGTGAGTTTAAATGTATTTGGCTAAGGTGTATGTAAACTTCCGACTTCAACTG -p GTAATACGACTCACTATAGGGCTCCGCTTAAGGGAC -t 2 -n 16 -q 13 -v 1
+```
 
+```bash
 python NetCIS/netcis/preprocess_insertions.py -o output/results -i input_files/2020_SB.tsv -j 32 -v 1
+```
 
+```bash
 python NetCIS/netcis/insertions_to_bed.py -o output/results -v 1
 ```
 
