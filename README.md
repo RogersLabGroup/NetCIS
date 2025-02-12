@@ -6,7 +6,7 @@ NetCIS uses mathematical graphs to identify pseudo-CIS (pCIS) in case and contro
 
 We tested NetCIS on a previously published SB screen that used mutagenized T Cells to identify CIS mutations that can improve intratumoral trafficking. We were able to recapitulate in our top ranked CIS the previously validated genes Ehhadh, Sprr1b, and Aak1, in addition to discovering novel annotated CIS to microRNA 101c and the protein tyrosine phosphatase receptor type D (Ptprd), along with many unannotated CIS that would have been missed by other methods.
 
-NetCIS code and accompanying tutorial can be found at <https://github.com/FischyM/NetCIS>.
+NetCIS code and accompanying tutorial can be found at <https://github.com/RogersLabGroup/NetCIS>.  Tutorial data can be found at <https://zenodo.org/records/14733375>
 
 ## Requirements
 
@@ -35,7 +35,7 @@ cd netcis_tutorial
 NetCIS can be obtained with the following command.
 
 ```bash
-git clone git@github.com:FischyM/NetCIS.git
+git clone git@github.com:RogersLabGroup/NetCIS.git
 ```
 
 Once downloaded, you can recreate the netcis environment with conda and pip.
@@ -46,7 +46,7 @@ conda activate netcis
 pip install ranky
 ```
 
-Download input files from Zenodo
+Download input files from Zenodo (zenodo_get has been installed with the netcis environment)
 
 ```bash
 mkdir input_files
@@ -76,7 +76,7 @@ Run the full analysis using the script provided.
 ./run_2020_SB.sh
 ```
 
-Alternatively you can run each step at a time, however, the commands will be quite long, but are provided below. All arguments are detailed further in their respective python files which can be displayed by running the script with just the "-h" or "--help" argument.
+Alternatively you can run each step at a time, however, the commands will be long, but are provided below. All arguments are detailed further in their respective python files which can be displayed by running the script with just the "-h" or "--help" argument.
 
 ```bash
 python NetCIS/netcis/preprocess_reads.py --help
@@ -130,7 +130,7 @@ For subsequent runs
 python NetCIS/netcis/analysis.py -o output/results -a LT -b S -g input_files/MRK_List2.rpt -s input_files/m5.all.v2023.2.Mm.symbols.gmt -p 0.05 -x 5000 -m Gene -f "" -t 20000 -v 1
 ```
 
-Results are separated by the combination of case (LT) and control (S) and edge threshold (20000) and in this instance can be found in output/results-analysis/LT-S/20000
+Results are separated by the combination of case (LT) and control (S) and edge threshold (20000) and in this example can be found in output/results-analysis/LT-S/20000
 
 Each subdirectory of results has the following structure:
 
