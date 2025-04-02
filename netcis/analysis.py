@@ -642,11 +642,6 @@ def main(args):
     bed_df["strand"] = annot_df["strand"].fillna(".")
     bed_df.to_csv(main_res_dir / "MRK_List2.bed", sep="\t", index=False, header=False)
 
-
-    # NOTE: For next version
-    # the number of insertions (CPM) isn't shown, just the insertion site. How should I portray this?
-    # maybe with color intensity?
-
     # make bed file for each region to plot in pyGenomeViewer for candidate genes and for top CIS
     pyGT_helper = output / "pyGT_helper"
     pyGT_helper.mkdir(exist_ok=True, parents=True)

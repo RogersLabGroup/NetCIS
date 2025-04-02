@@ -13,6 +13,10 @@ run_2020_SB.sh
 pseudo_code.md
 nohup.out
 
+netcis/read_depth.py
+netcis/test_manual_progress_bar.py
+netcis/utils.py
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -1,10 +1,13 @@
 # NetCIS: Network-based Common Insertion Site analysis
 
-Forward genetic screens have become powerful tools for biological discoveries as they do not require any a priori knowledge of genes controlling a phenotype of interest. Sleeping Beauty (SB) has become a tool that can cause gain and loss of gene function with its ability to insert a DNA transposon at any TA dinucleotide site and has become a tool used to recapitulate hematopoietic and epithelial malignancies that mimic human tumors. Many tools have been created to identify which mutational insertions are driving these generated malignancies, deemed Common Insertion Sites (CIS), however, none currently implement case-control comparisons in a direct data-driven way. We have developed NetCIS: a Network-based Common Insertion Site analysis tool to robustly identify CIS in a case-control phenotype selection screen.
+Forward genetic screens are powerful tools for biological discoveries as they do not require any a priori knowledge of genes controlling a phenotype of interest. Sleeping Beauty (SB) is a DNA transposon mutagenesis system that induces gain- and/or loss-of-gene-function when it inserts into or near a gene. SB is traditionally used to model heterogeneic and spontaneous malignancies and discover tumor driver genes. Mutations caused by SB insertions are typically observed using sequencing-based methods, then analyzed using computational tools to determine which insertions are driving the phenotype, termed Common Insertion Sites (CIS). Many computational analysis tools have been created to call CIS; however, none implement case-control comparisons in a direct and data-driven way. We have developed NetCIS: a Network-based Common Insertion Site analysis tool to robustly identify CIS in forward genetic screens with a case-control study design.
 
-NetCIS uses mathematical graphs to identify pseudo-CIS (pCIS) in case and control samples. These pCIS are used to determine a CIS, where a case pCIS overlaps with a control pCIS, or in a situation where there is no overlap in a pCIS. Overlapping pCISes are tested for significance in their read counts per insertion sites with the Wilcoxon rank sums test as well as the number of sample cases and controls that are found in the pCIS using the Fisher exact test. We prioritize a data-driven approach and do not require that insertions are annotated to a reference TA site nor that a CIS is annotated to a gene or other genomic feature.
+NetCIS uses mathematical graphs to identify pseudo-CIS (pCIS) in case and control samples. These pCIS are used to define genomic regions where pCIS from the case group can be compared to pCIS from the control group, reducing the problem space from the whole genome to observed insertion sites. Overlapping pCIS are tested for significance in their read counts per insertion sites with the Wilcoxon rank sums test and the Fisher’s exact test. We prioritize a data-driven approach and do not require that insertions are annotated to a reference TA site nor that a CIS is annotated to a gene or other genomic feature.
 
-We tested NetCIS on a previously published SB screen that used mutagenized T Cells to identify CIS mutations that can improve intratumoral trafficking. We were able to recapitulate in our top ranked CIS the previously validated genes Ehhadh, Sprr1b, and Aak1, in addition to discovering novel annotated CIS to microRNA 101c and the protein tyrosine phosphatase receptor type D (Ptprd), along with many unannotated CIS that would have been missed by other methods.
+NetCIS was tested using data from a published SB screen studying intratumoral T cell trafficking(1). Briefly, T cells were mutagenized and allowed to infiltrate into tumors. Mutations in T cells that got into the tumor (case) were compared to mutations in T cells that were in the spleen but not in the tumor (control) to identify T cell mutations that support tumor infiltration. Three of these genes—Ehhadh, Sprr1b, and Aak1—were subsequently validated using in vivo adoptive transfer experiments(2). Using NetCIS, we successfully replicated identification of these experimentally validated genes. Importantly, we also discovered novel CIS, including miRNA Mir101c, Protein tyrosine phosphatase receptor type D (Ptprd), and several unannotated CIS that are missed by other methods.
+
+1: Rogers LM, Wang Z, Mott SL, et al. A Genetic Screen to Identify Gain- and Loss-of-Function Modifications that Enhance T-cell Infiltration into Tumors. Cancer Immunol. Res. 2020; 8:1206–1214
+2: Vianzon VV, Hanson RM, Garg I, et al. Rank aggregation of independent genetic screen results highlights new strategies for adoptive cellular transfer therapy of cancer. Front. Immunol. 2023; 14:1235131
 
 NetCIS code and accompanying tutorial can be found at <https://github.com/RogersLabGroup/NetCIS>.  Tutorial data can be found at <https://zenodo.org/records/14733375>
 
@@ -14,7 +17,7 @@ Users should have a basic knowledge of Linux command line and will benefit with 
 
 Users should have access to a Linux x86_64 computer with a minimum of 8 cores and 32 GB RAM, and at least 300 GB of hard drive space. More cores will lead to faster run times, especially for step 1.
 
-NetCIS has been tested on Ubuntu 22.04.5, with 32 cores of Intel(R) Xeon(R) CPU E5-2630 v3 @ 2.40GHz and 192 GB RAM. There is no gurantee for NetCIS to run on other operating systems.
+NetCIS has been tested on Ubuntu 22.04.5, with 32 cores of Intel(R) Xeon(R) CPU E5-2630 v3 @ 2.40GHz and 192 GB RAM. There is no guarantee for NetCIS to run on other operating systems.
 
 ## Setup
 
@@ -35,7 +38,7 @@ cd netcis_tutorial
 NetCIS can be obtained with the following command.
 
 ```bash
-git clone git@github.com:RogersLabGroup/NetCIS.git
+git clone https://github.com/RogersLabGroup/NetCIS.git
 ```
 
 Once downloaded, you can recreate the netcis environment with conda and pip.
@@ -76,7 +79,7 @@ Run the full analysis using the script provided.
 ./run_2020_SB.sh
 ```
 
-Alternatively you can run each step at a time, however, the commands will be long, but are provided below. All arguments are detailed further in their respective python files which can be displayed by running the script with just the "-h" or "--help" argument.
+Alternatively, you can run each step at a time, with the commands provided in Steps 1-4 below. All arguments are further detailed in their respective python files, which can be displayed by running the script with just the "-h" or "--help" argument.
 
 ```bash
 python NetCIS/netcis/preprocess_reads.py --help
@@ -120,12 +123,12 @@ python NetCIS/netcis/cis_networks.py -o output/results -a LT -b S -j 32 -t 20000
 
 ### Step 4: Analysis
 
-For the first run. For gene set enrichment, we remove redundant gene sets. This uses scikit-learn's pairwise_distance function which by default will use as many cores and memory as available. Once this is done, a copy of these pathways are saved in order to speed up subsequent runs of this step.
+(For the first run) For gene set enrichment, redundant gene sets are removed. Removal uses scikit-learn's pairwise_distance function, which by default will use as many cores and memory as available. Once this is done, a copy of these pathways are saved in order to speed up subsequent runs of this step.
 
 - Time to run: ~7.5 minutes
 - Max memory used: ~33 GB, about 1 GB per core
 
-For subsequent runs
+(For subsequent runs)
 
 - Time to run: ~2.5 minutes
 - Max memory used: ~3 GB
@@ -134,7 +137,7 @@ For subsequent runs
 python NetCIS/netcis/analysis.py -o output/results -a LT -b S -g input_files/MRK_List2.rpt -s input_files/m5.all.v2023.2.Mm.symbols.gmt -p 0.05 -x 5000 -m Gene -f "" -t 20000 -v 1
 ```
 
-Results are separated by the combination of case (LT) and control (S) and edge threshold (20000) and in this example can be found in output/results-analysis/LT-S/20000
+Results are separated by the combination of case (LT) and control (S) and edge threshold (20000) and in this example can be found in output/results-analysis/LT-S/20000.
 
 Each subdirectory of results has the following structure:
 
