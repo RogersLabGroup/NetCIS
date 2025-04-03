@@ -73,9 +73,11 @@ cd ..
 
 ## Run NetCIS
 
+Give permission to run script.
 Run the full analysis using the script provided.
 
 ```bash
+chmod +x run_2020_SB.sh
 ./run_2020_SB.sh
 ```
 
