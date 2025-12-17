@@ -92,6 +92,9 @@ def run_preprocessing(cutadapt, ntask, genome_index_dir, trim1_f, trim1_r, pre_b
     sam_sort = f"samtools sort -@ {ntask} -o {pre_bam_file} {pre_bam_file}"
     # sam_filter = f"samtools view -h -@ {ntask} -f 3 -1 -o {bam_file} {pre_bam_file}"
     sam_filter = f"samtools view -h -@ {ntask} -q 13 -f 67 -F 12 -1 -o {bam_file} {pre_bam_file}"
+    # q: mapq score less that 13 are removed (ie. readsa that have a chance of being wrong more than 5% of the time)
+    # f: keep reads that are properly paired and read 1
+    # F: remove reads that are not mapped in read 1 or read 2
     sam_index = f"samtools index -@ {ntask} {bam_file}"
     sam_index2 = f"samtools index -@ {ntask} {pre_bam_file}"
     sam_stats = f"samtools idxstats {bam_file} > {report_output / bam_report}"
@@ -118,7 +121,7 @@ def preprocess_reads(tpn: Seq, primer: Seq, read_f: Path, read_r: Path, mysample
         bam_file = mysample_file.with_suffix(".orient_pos.bam")
         bam_report = mysample_file.with_suffix(".idxstats-orient_pos.txt").name
         
-        cutadapt1 = f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
+        cutadapt1 = f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any --rc "
         cutadapt3 = f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
     
         if cutadapt_policy == 'low':
@@ -164,7 +167,7 @@ def preprocess_reads(tpn: Seq, primer: Seq, read_f: Path, read_r: Path, mysample
         bam_file = mysample_file.with_suffix(".orient_neg.bam")
         bam_report = mysample_file.with_suffix(".idxstats-orient_neg.txt").name
         
-        cutadapt1 = f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
+        cutadapt1 = f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any --rc "
         cutadapt3 = f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
         
         if cutadapt_policy == 'low':

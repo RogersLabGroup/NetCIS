@@ -286,9 +286,9 @@ def process_bam_helper(iter_args: dict) -> None:
             tpn_orient_df[col] = row[col]
     
     # save insertions
-    individual_df.to_pickle(insertions_dir / (sample_id + ".pkl"))   # for insertions_to_bed.py
-    strand_df.to_pickle(strand_dir / (sample_id + ".pkl"))             # for pcis_networks.py
-    tpn_orient_df.to_pickle(tpn_orient_dir / (sample_id + ".pkl"))           # for a future version of NetCIS that uses strand and tpn orientation info pCIS
+    individual_df.to_pickle(insertions_dir / (sample_id + ".pkl"))      # for insertions_to_bed.py
+    strand_df.to_pickle(strand_dir / (sample_id + ".pkl"))              # for pcis_networks.py
+    tpn_orient_df.to_pickle(tpn_orient_dir / (sample_id + ".pkl"))      # for a future version of NetCIS that uses strand and tpn orientation info pCIS
 
 
 def main() -> None:
