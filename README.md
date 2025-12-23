@@ -186,3 +186,24 @@ Each subdirectory of results has the following structure:
   - CIS_start: genomic location of the beginning of the CIS
   - CIS_end: genomic location of the ending of the CIS
   - genome_viewer: string that is used to find the specific CIS in a genome viewer application
+
+## Run NetCIS with your own list of insertions
+
+If a user has data that used a different preprocessing pipeline, it is possible to supply NetCIS with a list of insertions. This can be done at step 2: generating pCIS networks.
+
+In pcis_networks.py, the typical scenario is to create a single dataframe from the individual sample level insertion files that are saved as a pickle file (.pkl). Instead, you can supply a TSV file via --insertion_file arg. Each row of this file needs to correpsond to the total number of insertions sequenced within a single sample. The insertion file must contain the following columns:
+
+- chr: chromosome (chr1, chr2, ...)
+- pos: genomic position (3667735, 7225915, ...)
+- library: the sequcing library (IRR or IRL). This corresponds to whichever transposon junction was sequenced
+- count: number of raw reads sequenced for a sample (nonzero integer)
+- CPM: counts per million, normalized to the total number of reads for the library and transposon orientation (float)
+- sample_id: name of sample where the sequenced insertions are derived from
+- treatment: name for the case or control treatment (NetCIS used LT, RT, and S)
+
+NetCIS also has the following optional columns that you will see in the tutorial data but are not currently used (12/23/2025):
+
+- strand: which strand the insertion is on. Not currently propagated past pcis.networks.py, but planned for future extensions of NetCIS (+ or -)
+- chrom_norm: chromosome normalized read count, propagated from preprocessing insertions
+- tumor_model: metadata column that is not used to create networks, just propagated from preprocessing insertions
+- pd1_treated: metadata column that is not used to create networks, just propagated from preprocessing insertions

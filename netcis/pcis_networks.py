@@ -24,6 +24,7 @@ def load_args() -> dict:
      -v, --verbose=N                   print more verbose information if available using 0, 1 or 2 [default: 0]
      -t, --threshold=N                 maximum distance to connect two insertions together in the CIS network. We suggest not going over the default value [default: 50000]
      -j, --njobs=N                     number of processes to run [default: 1]
+     -i, --insertion_file=FILE         alternatively use a TSV file with all insertions. See README.md for more information [default: None]
     """
 
     # remove "--" from args
@@ -38,7 +39,12 @@ def load_args() -> dict:
         for key, item in args.items():
             print(f"\t{key}: {item}")
         print("\n")
-        
+    
+    if args['insertion_file'] == "None" or args['insertion_file'] is None:
+        args['insertion_file'] = None
+    else:
+        args['insertion_file'] = Path(args['insertion_file'])
+    
     args["insertion_dir"] = Path(args["output_prefix"] + "-insertions")
     args["strand_dir"] = Path(args["output_prefix"] + "-insertions-strand")
     args["tpn_orient_dir"] = Path(args["output_prefix"] + "-insertions-strand-tpn_orient")
@@ -191,10 +197,21 @@ def create_graph_generator(chrom_list, treatment_inserts, treatment_dir, args):
 def main(args) -> None:
     edge_threshold = args["threshold"]
     verbose = args["verbose"]
+    insertion_file = args["insertion_file"]
     
+    # load single file of all insertions
+    if insertion_file is not None:
+        inserts_df = pd.read_csv(insertion_file, sep="\t")
+        required_columns = ['chr', 'pos', 'library', 'count', 'CPM', 'sample_id', 'treatment']
+        for col in inserts_df.columns.tolist():
+            assert col in required_columns, f"Column '{col}' not found in insertion file '{insertion_file}'.\nPlease ensure the file has the required columns: {required_columns}"
+
     # get all files in data dir, load each file as pandas.DataFrame
-    insertion_list: list[pd.DataFrame] = [ pd.read_pickle(file) for file in args["strand_dir"].iterdir() ]
-    inserts_df = pd.concat(insertion_list, ignore_index=True)
+    else:
+        insertion_list: list[pd.DataFrame] = [ pd.read_pickle(file) for file in args["strand_dir"].iterdir() ]
+        inserts_df = pd.concat(insertion_list, ignore_index=True)
+        
+    # track the library the insertions came from
     inserts_df.insert(4, "counts_irr", np.where(inserts_df['library'] == 'IRR', 1, 0))
     inserts_df.insert(5, "counts_irl", np.where(inserts_df['library'] == 'IRL', 1, 0))
     
