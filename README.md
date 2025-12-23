@@ -191,7 +191,7 @@ Each subdirectory of results has the following structure:
 
 If a user has data that used a different preprocessing pipeline, it is possible to supply NetCIS with a list of insertions. This can be done at step 2: generating pCIS networks.
 
-In pcis_networks.py, the typical scenario is to create a single dataframe from the individual sample level insertion files that are saved as a pickle file (.pkl). Instead, you can supply a TSV file via --insertion_file arg. Each row of this file needs to correpsond to the total number of insertions sequenced within a single sample. The insertion file must contain the following columns:
+In pcis_networks.py, the typical scenario is to create a single dataframe from the individual sample level insertion files that are saved as a pickle file (.pkl). Instead, you can supply a TSV file via --insertion_file arg. Each row of this file needs to correpsond to the total number of insertions sequenced within a single sample at a unqiue chromosome and position. Therefore, there could be multiple rows with the same chromosome and position, but they could come from different libraries or from different samples.The insertion file must contain the following columns:
 
 - chr: chromosome (chr1, chr2, ...)
 - pos: genomic position (3667735, 7225915, ...)
