@@ -42,6 +42,7 @@ def load_args() -> dict:
      -f, --feature_type=STR             marker feature type to annotate based on MRK_List2.rpt file. An empty string "" will not do any filtering [default: protein coding gene]
      -n, --num_cis=N                    and integer number of top ranked CIS to create genome viewer plots for. [default: 20]
      -j, --sim_thresh=N                 theshold for the Jaccard distance used in removing redundant pathways for gene set enrichment [default: 0.5]
+     -e, --remove_empty_cis             remove CIS that do not have any genomic annotations [default: False]
     """
     
     # remove "--" from args
@@ -54,6 +55,8 @@ def load_args() -> dict:
     float_opts = ["pval_threshold", "sim_thresh"]
     for opts in float_opts:
         args[opts] = float(args[opts])
+    
+    args['remove_empty_cis'] = bool(args['remove_empty_cis'])
     
     if args["verbose"] > 1:
         print("Arguements given")
@@ -231,7 +234,7 @@ def get_dist(m, i, j):
     # see scipy documentation for pdist for more info
     return m * i + j - ((i + 2) * (i + 1)) // 2
 
-def prepare_gene_set(gene_set_file, gene_set_output, sim_thresh=0.5, verbose=False):
+def prepare_gene_set(gene_set_file, gene_set_output, sim_thresh, verbose=False):
     # it can be time consuming removing redundant pathways so if the gene sets are already made then skip this step
     final_gene_set_name = f'final_gene_sets-sim_{sim_thresh}.pkl'
     if (gene_set_output / final_gene_set_name).is_file():
@@ -534,6 +537,7 @@ def main(args):
     feature_type = args['feature_type']
     num_cis = args['num_cis']
     sim_thresh = args['sim_thresh']
+    remove_empty_cis_flag = args['remove_empty_cis']
     
     if verbose:
         print('analysis.py')
@@ -553,6 +557,14 @@ def main(args):
     data_df["genes"] = data_df["genes"].apply(lambda x: remove_Gm(x))
     if verbose:
         print(f"number of annotations: {data_df['genes'].apply(lambda x: len(x)).sum()}")
+        
+    # Optionally remove CIS that do not have any genomic annotations
+    if remove_empty_cis_flag:
+        pre_len = len(data_df)
+        data_df = data_df[data_df['genes'].apply(lambda x: len(x) > 0)].reset_index(drop=True)
+        post_len = len(data_df)
+        if verbose:
+            print(f"started with {pre_len} CIS, and ended with {post_len} CIS after removing those that have no genomic annotations")
         
     # multi-test correction with Benjaminini-Yekutieli method and the -log10 transformation
     data_df["ranksums-neglog"] = -np.log10(data_df["ranksums"])
@@ -617,7 +629,7 @@ def main(args):
     main_res_dir = output.parent.parent.parent
     gene_set_output = main_res_dir / "processed_gene_sets"
     gene_set_output.mkdir(exist_ok=True, parents=True)
-    gene_sets, filtered_gene_sets, final_gene_sets = prepare_gene_set(gene_set_file, gene_set_output, verbose=verbose)
+    gene_sets, filtered_gene_sets, final_gene_sets = prepare_gene_set(gene_set_file, gene_set_output, sim_thresh=sim_thresh, verbose=verbose)
     # NOTE: it is suggested to use the final_gene_sets, as these are pathway that have been filtered for gene size
     # and redundant pathways removed.
     
