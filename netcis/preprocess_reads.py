@@ -167,7 +167,15 @@ def preprocess_reads(tpn: Seq, primer: Seq, read_f: Path, read_r: Path, mysample
         bam_file = mysample_file.with_suffix(".orient_neg.bam")
         bam_report = mysample_file.with_suffix(".idxstats-orient_neg.txt").name
         
-        cutadapt1 = f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any --rc "
+        # TODO: 12/29/25 - MathewF
+        # Do we need to use --rc here? 
+        # Rogers 2020 did split i7 and i5 indexes for read 1 and read 2 so there likely are RC reads here.
+        # How does downstream code react to this and what are the implications?
+        # From Cutadapt docs, it will run the search twice, however, we are already specifically running
+        # for different orientations so this may not be necessary. In the case for paired-end reads,
+        # Cutadapt will swap R1 and R2.
+        # More thought and testing on this is needed.
+        cutadapt1 = f"cutadapt -j {ntask} -m 20 --discard-untrimmed --pair-filter=any "
         cutadapt3 = f"-o {trim1_f} -p {trim1_r} {read_f} {read_r} > {report_output / cutadapt_report}"
         
         if cutadapt_policy == 'low':

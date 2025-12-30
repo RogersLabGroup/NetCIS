@@ -42,7 +42,9 @@ def load_args() -> dict:
      -f, --feature_type=STR             marker feature type to annotate based on MRK_List2.rpt file. An empty string "" will not do any filtering [default: protein coding gene]
      -n, --num_cis=N                    and integer number of top ranked CIS to create genome viewer plots for. [default: 20]
      -j, --sim_thresh=N                 theshold for the Jaccard distance used in removing redundant pathways for gene set enrichment [default: 0.5]
-     -e, --remove_empty_cis             remove CIS that do not have any genomic annotations [default: False]
+     --remove_empty_cis                 remove CIS that do not have any genomic annotations [default: False]
+     --keep_gm                          keep Gm genes in the genomic annotations [default: False]
+     
     """
     
     # remove "--" from args
@@ -57,6 +59,7 @@ def load_args() -> dict:
         args[opts] = float(args[opts])
     
     args['remove_empty_cis'] = bool(args['remove_empty_cis'])
+    args['keep_gm'] = bool(args['keep_gm'])
     
     if args["verbose"] > 1:
         print("Arguements given")
@@ -538,6 +541,7 @@ def main(args):
     num_cis = args['num_cis']
     sim_thresh = args['sim_thresh']
     remove_empty_cis_flag = args['remove_empty_cis']
+    keep_gm_flag = args['keep_gm']
     
     if verbose:
         print('analysis.py')
@@ -551,10 +555,15 @@ def main(args):
 
     # process results and annotation fileargs
     data_df = cast_indexes(CIS_df)
+    
     # data_df = filter_low_read_CIS(data_df, verbose)
+    
     data_df["genes"] = annotate_cis(data_df, annot_df, marker_expander)
+    
     # remove G-protein genes cause...there's a lot?
-    data_df["genes"] = data_df["genes"].apply(lambda x: remove_Gm(x))
+    if not keep_gm_flag:
+        data_df["genes"] = data_df["genes"].apply(lambda x: remove_Gm(x))
+        
     if verbose:
         print(f"number of annotations: {data_df['genes'].apply(lambda x: len(x)).sum()}")
         

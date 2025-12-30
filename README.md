@@ -6,10 +6,15 @@ NetCIS uses mathematical graphs to identify pseudo-CIS (pCIS) in case and contro
 
 NetCIS was tested using data from a published SB screen studying intratumoral T cell trafficking(1). Briefly, T cells were mutagenized and allowed to infiltrate into tumors. Mutations in T cells that got into the tumor (case) were compared to mutations in T cells that were in the spleen but not in the tumor (control) to identify T cell mutations that support tumor infiltration. Three of these genes—Ehhadh, Sprr1b, and Aak1—were subsequently validated using in vivo adoptive transfer experiments(2). Using NetCIS, we successfully replicated identification of these experimentally validated genes. Importantly, we also discovered novel CIS, including miRNA Mir101c, Protein tyrosine phosphatase receptor type D (Ptprd), and several unannotated CIS that are missed by other methods.
 
-1: Rogers LM, Wang Z, Mott SL, et al. A Genetic Screen to Identify Gain- and Loss-of-Function Modifications that Enhance T-cell Infiltration into Tumors. Cancer Immunol. Res. 2020; 8:1206–1214
-2: Vianzon VV, Hanson RM, Garg I, et al. Rank aggregation of independent genetic screen results highlights new strategies for adoptive cellular transfer therapy of cancer. Front. Immunol. 2023; 14:1235131
+NetCIS code and accompanying tutorial can be found at <https://github.com/RogersLabGroup/NetCIS>
 
-NetCIS code and accompanying tutorial can be found at <https://github.com/RogersLabGroup/NetCIS>.  Tutorial data can be found at <https://zenodo.org/records/14733375>
+Tutorial data can be found at <https://doi.org/10.5281/zenodo.18024128>
+
+NetCIS has been peer-reviewed and published here <TODO.url>
+
+1: Rogers LM, Wang Z, Mott SL, et al. A Genetic Screen to Identify Gain- and Loss-of-Function Modifications that Enhance T-cell Infiltration into Tumors. Cancer Immunol. Res. 2020; 8:1206–1214
+
+2: Vianzon VV, Hanson RM, Garg I, et al. Rank aggregation of independent genetic screen results highlights new strategies for adoptive cellular transfer therapy of cancer. Front. Immunol. 2023; 14:1235131
 
 ## Requirements
 
@@ -28,7 +33,7 @@ conda config --add channels bioconda
 conda config --add channels conda-forge
 ```
 
-Make a directory to download NetCIS and related tutorial files to.  
+Make a directory to download NetCIS and related tutorial files to.
 
 ```bash
 mkdir netcis_tutorial
@@ -138,6 +143,26 @@ python NetCIS/netcis/cis_networks.py -o output/results -a LT -b S -j 32 -t 20000
 ```bash
 python NetCIS/netcis/analysis.py -o output/results -a LT -b S -g input_files/MRK_List2.rpt -s input_files/m5.all.v2023.2.Mm.symbols.gmt -p 0.05 -x 5000 -m Gene -f "" -t 20000 -v 1
 ```
+
+#### Note
+
+By default we remove genomic features that start with "Gm". To keep these genes in, use the following flag.
+
+```bash
+--keep_gm
+```
+
+#### Removing unannotated CIS
+
+If users are only interested in CIS that are annotated, one may add this flag to the command above to remove unannotated CIS.
+
+```bash
+--remove_empty_cis
+```
+
+CIS removal will occur before multiple hypothesis testing correction, and therefore will lead to slightly better corrected FDRs. This option does not affect the relative ranking of annotated CIS (ie., the rank order of the annotated CIS will not be different if unannotated CIS are included or excluded).
+
+## Results
 
 Results are separated by the combination of case (LT) and control (S) and edge threshold (20000) and in this example can be found in output/results-analysis/LT-S/20000.
 

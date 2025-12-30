@@ -174,7 +174,7 @@ def create_graph(iter_args):
     G.add_nodes_from(add_nodes(insertion_nodes_df))
     G.add_edges_from(find_edges(G.nodes(), threshold))
     
-    if verbose > 1:
+    if (verbose > 1) and (G.number_of_nodes() > 0):
         graph_properties(G, verbose=verbose)
 
     # save the graph
